@@ -254,6 +254,7 @@ constexpr SearchEntry kSearchIndex[] = {
     { "Show Master as Track 0 on UC1",         kSecBehaviour, "Master track", kDevUc1 },
     { "Pinned Master",                         kSecBehaviour, "Master track" },
     { "Monitor output",                        kSecBehaviour, "Master track" },
+    { "Level knob step",                       kSecBehaviour, "Master track" },
     { "Don't show offline FX",                 kSecBehaviour, "Plug-ins" },
     { "Wrap Plug-in Cycle",                    kSecBehaviour, "Plug-ins" },
     { "SSL Strip Mode follows focused plug-in window",

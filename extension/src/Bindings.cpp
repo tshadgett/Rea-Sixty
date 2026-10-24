@@ -8717,13 +8717,13 @@ static const BuiltinDoc kBuiltinDocs[] = {
     { "playhead_nudge",
       "Encoder action. Nudges the playhead by REAPER's own Nudge setting." },
     { "master_volume",
-      "Encoder action. Moves the master track's volume 0.5 dB a detent "
-      "(0.1 dB with Fine)." },
+      "Encoder action. Moves the master track's volume by the Level knob step "
+      "(Settings -> Behaviour -> Master track) a detent." },
     { "master_volume_reset",
       "Puts the master track's volume on 0 dB." },
     { "monitor_level",
-      "Encoder action. Moves the monitor output 0.5 dB a detent (0.1 dB with "
-      "Fine): the master track's hardware output chosen under Settings -> "
+      "Encoder action. Moves the monitor output by the Level knob step a detent: "
+      "the master track's hardware output chosen under Settings -> "
       "Behaviour -> Master track -> Monitor output." },
     { "monitor_level_reset",
       "Puts the monitor output (Settings -> Behaviour -> Master track) on 0 dB." },

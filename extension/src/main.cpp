@@ -4356,6 +4356,14 @@ std::atomic<bool> g_masterVolReset{false};
 std::atomic<int>  g_monitorSteps{0};
 std::atomic<bool> g_monitorReset{false};
 std::atomic<int>  g_monitorHwOut{0};
+// dB per detent for master_volume / monitor_level, in tenths (5 = 0.5 dB).
+// Fine divides it by five. ExtState rea_sixty / level_knob_step.
+std::atomic<int>  g_levelKnobStepTenths{5};
+inline double levelKnobStepDb_()
+{
+    const double st = std::clamp(g_levelKnobStepTenths.load(), 1, 60) / 10.0;
+    return shiftFineActive_() ? st / 5.0 : st;
+}
 std::atomic<bool> g_softKeyDirty{false};
 // When on (default), a focused-parameter change switches the SSL soft-key bank
 // to whichever bank holds that param ("bank-follow-focus"). Off = the soft-key
@@ -48682,7 +48690,7 @@ void onTimerBody_()
             if (MediaTrack* m = GetMasterTrack(nullptr)) {
                 double v = reset ? 1.0 : GetMediaTrackInfo_Value(m, "D_VOL");
                 if (steps != 0) {
-                    const double perStep = shiftFineActive_() ? 0.1 : 0.5;
+                    const double perStep = levelKnobStepDb_();
                     double db = (v > 0.0) ? 20.0 * std::log10(v) : -90.0;
                     if (db < -90.0) db = -90.0;
                     db += steps * perStep;
@@ -48704,7 +48712,7 @@ void onTimerBody_()
             && idx < GetTrackNumSends(m, 1)) {
             double v = reset ? 1.0 : GetTrackSendInfo_Value(m, 1, idx, "D_VOL");
             if (steps != 0) {
-                const double perStep = shiftFineActive_() ? 0.1 : 0.5;
+                const double perStep = levelKnobStepDb_();
                 double db = (v > 0.0) ? 20.0 * std::log10(v) : -90.0;
                 if (db < -90.0) db = -90.0;
                 db += steps * perStep;
@@ -51777,6 +51785,15 @@ const char* reasixty_masterHwOutName(int i)
     return s.c_str();
 }
 int  reasixty_monitorHwOut() { return g_monitorHwOut.load(); }
+int  reasixty_levelKnobStepTenths() { return g_levelKnobStepTenths.load(); }
+void reasixty_setLevelKnobStepTenths(int t)
+{
+    t = std::clamp(t, 1, 60);
+    g_levelKnobStepTenths.store(t);
+    char b[8];
+    std::snprintf(b, sizeof(b), "%d", t);
+    SetExtState("rea_sixty", "level_knob_step", b, true);
+}
 void reasixty_setMonitorHwOut(int i)
 {
     g_monitorHwOut.store(std::max(0, i));
@@ -58239,7 +58256,7 @@ void registerBindingHandlers()
             if (!firing || param == 0) return;
             g_masterVolSteps.fetch_add(param);
         },
-        nullptr, "Encoder: master volume (0.5 dB / detent)", false
+        nullptr, "Encoder: master volume", false
     });
     registerBuiltin("master_volume_reset", DescBuilder{
         [](bool firing, bool /*pressed*/, int /*param*/) {
@@ -58253,7 +58270,7 @@ void registerBindingHandlers()
             if (!firing || param == 0) return;
             g_monitorSteps.fetch_add(param);
         },
-        nullptr, "Encoder: monitor level (master hardware output, 0.5 dB / detent)", false
+        nullptr, "Encoder: monitor level (master hardware output)", false
     });
     registerBuiltin("monitor_level_reset", DescBuilder{
         [](bool firing, bool /*pressed*/, int /*param*/) {
@@ -60357,6 +60374,8 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
     // Restore persisted UI mode flags (Pan override, encoder mode) so
     // they survive REAPER restarts. ExtState is global per-extension —
     // persistAcrossSessions=true writes through to reaper-extstate.ini.
+    if (const char* v = GetExtState("rea_sixty", "level_knob_step"); v && *v)
+        g_levelKnobStepTenths.store(std::clamp(std::atoi(v), 1, 60));
     if (const char* v = GetExtState("rea_sixty", "monitor_hwout"); v && *v)
         g_monitorHwOut.store(std::max(0, std::atoi(v)));
     if (const char* v = GetExtState("ReaSixty", "softKeyBankRight"); v && *v)

@@ -45,6 +45,8 @@ int  reasixty_masterHwOutCount();
 const char* reasixty_masterHwOutName(int i);
 int  reasixty_monitorHwOut();
 void reasixty_setMonitorHwOut(int i);
+int  reasixty_levelKnobStepTenths();
+void reasixty_setLevelKnobStepTenths(int t);
 const char* reasixty_uc1Serial();
 const char* reasixty_uf1Serial();
 bool reasixty_sleepEnabled();
@@ -1371,6 +1373,27 @@ void SettingsScreen::drawBehaviour(ImGui_Context* ctx)
                 bool sel = (cur == i);
                 if (ImGui_Selectable(ctx, item, &sel, nullptr, nullptr, nullptr))
                     reasixty_setMonitorHwOut(i);
+            }
+            ImGui_EndCombo(ctx);
+        }
+    }
+    {
+        // dB per detent for the monitor-level and master-volume encoder actions.
+        static const int  kSteps[] = { 1, 2, 5, 10, 20, 30 };
+        static const char* kLabels[] = { "0.1 dB", "0.2 dB", "0.5 dB", "1 dB", "2 dB", "3 dB" };
+        const int cur = reasixty_levelKnobStepTenths();
+        const char* preview = "0.5 dB";
+        for (int k = 0; k < 6; ++k) if (kSteps[k] == cur) preview = kLabels[k];
+        ImGui_Text(ctx, "Level knob step");
+        help_(ctx, "How far one detent moves the monitor level / master volume "
+                   "encoder actions. Fine divides it by five.");
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        ImGui_SetNextItemWidth(ctx, 120.0);
+        if (ImGui_BeginCombo(ctx, "##level_knob_step", preview, nullptr)) {
+            for (int k = 0; k < 6; ++k) {
+                bool sel = (kSteps[k] == cur);
+                if (ImGui_Selectable(ctx, kLabels[k], &sel, nullptr, nullptr, nullptr))
+                    reasixty_setLevelKnobStepTenths(kSteps[k]);
             }
             ImGui_EndCombo(ctx);
         }
