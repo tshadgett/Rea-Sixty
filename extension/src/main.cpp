@@ -48551,6 +48551,20 @@ void onTimerBody_()
             }
         }
     }
+    // Colour → lamp table: re-read about once a second, apply on change.
+    {
+        static int         sTick = 0;
+        static std::string sLast = "\x01";   // never a real value: load on tick 1
+        if (sTick++ % 30 == 0) {
+            const char* v = GetExtState("rea_sixty", "uf8_colour_map");
+            const std::string cur = v ? v : "";
+            if (cur != sLast) {
+                sLast = cur;
+                uf8::setColourOverrides(uf8::parseColourOverrides(cur));
+                if (g_sync) g_sync->invalidate();
+            }
+        }
+    }
     if (g_sync) {
         // Phase 2.8 Nav Mode hijacks the colour-bar: marker/region colour
         // (or neutral fallback when no override) replaces track colour.
@@ -51580,6 +51594,28 @@ void reasixty_identifyUc1()
 bool reasixty_selFollowsColor()
 {
     return g_selFollowsColor.load();
+}
+
+// Colour → lamp table (Palette.h). The ExtState text is the one truth: the
+// Settings pane and any script (SetExtState rea_sixty / uf8_colour_map) write
+// it, and the timer picks a change up within a second (uf8PollColourMap_).
+const char* reasixty_colourMapText()
+{
+    static std::string s;
+    const char* v = GetExtState("rea_sixty", "uf8_colour_map");
+    s = v ? v : "";
+    return s.c_str();
+}
+void reasixty_setColourMapText(const char* text)
+{
+    SetExtState("rea_sixty", "uf8_colour_map", text ? text : "", true);
+}
+// The first selected track's colour as 0xRRGGBB, or -1 (none / no colour).
+int reasixty_selectedTrackRgb()
+{
+    MediaTrack* tr = GetSelectedTrack(nullptr, 0);
+    if (!tr || (GetTrackColor(tr) & 0x01000000) == 0) return -1;
+    return static_cast<int>(trackColorRgb(tr));
 }
 
 bool reasixty_routingNameInColourBar()

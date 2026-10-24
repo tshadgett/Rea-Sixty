@@ -12,6 +12,7 @@
 #include <string>           // g_scrollPending / g_scrollActive
 
 #include "Bindings.h"       // uf8::bindings::getActiveLayer (startup soft-key bank)
+#include "Palette.h"        // colour → lamp table
 #include "reaper_imgui_functions.h"
 #include "reaper_plugin_functions.h"   // Get/SetExtState
 
@@ -37,6 +38,9 @@ void reasixty_forgetAbsentDevices();
 const char* reasixty_uf8Serial();
 bool reasixty_uf8RightConnected();
 const char* reasixty_uf8RightSerial();
+const char* reasixty_colourMapText();
+void reasixty_setColourMapText(const char* text);
+int  reasixty_selectedTrackRgb();
 const char* reasixty_uc1Serial();
 const char* reasixty_uf1Serial();
 bool reasixty_sleepEnabled();
@@ -485,6 +489,85 @@ void SettingsScreen::drawAppearance(ImGui_Context* ctx)
                                         "Color bar names the send / receive source track"),
                        &routeName)) {
         reasixty_setRoutingNameInColourBar(routeName);
+    }
+
+    // ⇨ COLOUR → LAMP TABLE (Palette.h). One row per exact REAPER colour: its
+    // swatch, its hex, the lamp it lights. Edited here, kept in ExtState, so a
+    // script can write the same text. Rows are re-parsed from that text every
+    // frame — there is no second copy to drift.
+    {
+        ImGui_Spacing(ctx);
+        ImGui_Text(ctx, reasixty_sp("Track colour -> UF8 lamp", "Track color -> UF8 lamp"));
+        help_(ctx, "The UF8 has twelve lamp colours. Rea-Sixty picks the nearest one "
+                   "for each track colour, and that can differ from what SSL 360 picks. "
+                   "Each row here pins one exact track colour to one lamp; every other "
+                   "colour is matched as before. Select a track and press 'Add selected "
+                   "track's colour' to make a row for its colour.");
+        auto rows = uf8::parseColourOverrides(reasixty_colourMapText());
+        bool changed = false;
+        int  removeAt = -1;
+        for (int r = 0; r < static_cast<int>(rows.size()); ++r) {
+            char id[32];
+            std::snprintf(id, sizeof(id), "cmap%d", r);
+            ImGui_PushID(ctx, id);
+            const uint32_t rgb = rows[r].rgb;
+            int swFlags = 0; double sw = 28.0, sh = 18.0;
+            ImGui_ColorButton(ctx, "##track", static_cast<int>((rgb << 8) | 0xFF),
+                              &swFlags, &sw, &sh);
+            ImGui_SameLine(ctx, nullptr, nullptr);
+            char hex[16];
+            std::snprintf(hex, sizeof(hex), "#%06X", static_cast<unsigned>(rgb));
+            ImGui_Text(ctx, hex);
+            ImGui_SameLine(ctx, nullptr, nullptr);
+            ImGui_Text(ctx, "->");
+            ImGui_SameLine(ctx, nullptr, nullptr);
+            if (auto lamp = uf8::paletteSwatch(rows[r].index)) {
+                const int lrgb = (int(lamp->r) << 24) | (int(lamp->g) << 16)
+                               | (int(lamp->b) << 8) | 0xFF;
+                ImGui_ColorButton(ctx, "##lamp", lrgb, &swFlags, &sw, &sh);
+                ImGui_SameLine(ctx, nullptr, nullptr);
+            }
+            ImGui_SetNextItemWidth(ctx, 140.0);
+            if (ImGui_BeginCombo(ctx, "##lampcombo", uf8::paletteName(rows[r].index),
+                                 nullptr)) {
+                for (int i = 0; i <= 0x0C; ++i) {
+                    if (i > 0 && !uf8::paletteSwatch(static_cast<uint8_t>(i))) continue;
+                    bool sel = (rows[r].index == i);
+                    if (ImGui_Selectable(ctx, uf8::paletteName(static_cast<uint8_t>(i)),
+                                         &sel, nullptr, nullptr, nullptr)) {
+                        rows[r].index = static_cast<uint8_t>(i);
+                        changed = true;
+                    }
+                }
+                ImGui_EndCombo(ctx);
+            }
+            ImGui_SameLine(ctx, nullptr, nullptr);
+            if (ImGui_Button(ctx, "Remove", nullptr, nullptr)) removeAt = r;
+            ImGui_PopID(ctx);
+        }
+        if (removeAt >= 0) {
+            rows.erase(rows.begin() + removeAt);
+            changed = true;
+        }
+        const int selRgb = reasixty_selectedTrackRgb();
+        if (selRgb < 0) {
+            ImGui_TextDisabled(ctx, "Select a coloured track to add its colour.");
+        } else {
+            bool have = false;
+            for (const auto& o : rows) if (o.rgb == static_cast<uint32_t>(selRgb)) have = true;
+            if (have) {
+                ImGui_TextDisabled(ctx, "The selected track's colour already has a row.");
+            } else if (ImGui_Button(ctx, "Add selected track's colour##cmap_add",
+                                    nullptr, nullptr)) {
+                // Start on the lamp it lights today, so adding a row changes nothing
+                // until a lamp is picked.
+                const uint32_t c = static_cast<uint32_t>(selRgb);
+                rows.push_back({c, uf8::quantize(c)});
+                changed = true;
+            }
+        }
+        if (changed)
+            reasixty_setColourMapText(uf8::formatColourOverrides(rows).c_str());
     }
 
     // Track names longer than the 7-char scribble-strip slot need shortening.

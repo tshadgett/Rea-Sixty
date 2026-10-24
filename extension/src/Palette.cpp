@@ -4,6 +4,8 @@
 #include <array>
 #include <cmath>
 #include <limits>
+#include <mutex>
+#include <cstdio>
 
 namespace uf8 {
 
@@ -209,8 +211,62 @@ std::optional<Rgb> paletteSwatch(uint8_t index)
     return kSsl[index];
 }
 
+namespace {
+std::mutex                  g_overrideMx;
+std::vector<ColourOverride> g_overrides;
+} // anonymous
+
+void setColourOverrides(std::vector<ColourOverride> list)
+{
+    std::lock_guard<std::mutex> lk(g_overrideMx);
+    g_overrides = std::move(list);
+}
+
+std::vector<ColourOverride> colourOverrides()
+{
+    std::lock_guard<std::mutex> lk(g_overrideMx);
+    return g_overrides;
+}
+
+std::string formatColourOverrides(const std::vector<ColourOverride>& list)
+{
+    std::string out;
+    char buf[16];
+    for (const auto& o : list) {
+        std::snprintf(buf, sizeof(buf), "%06X=%02X;",
+                      static_cast<unsigned>(o.rgb & 0xFFFFFFu),
+                      static_cast<unsigned>(o.index));
+        out += buf;
+    }
+    return out;
+}
+
+std::vector<ColourOverride> parseColourOverrides(std::string_view text)
+{
+    std::vector<ColourOverride> out;
+    size_t pos = 0;
+    while (pos < text.size()) {
+        size_t end = text.find(';', pos);
+        if (end == std::string_view::npos) end = text.size();
+        const std::string item(text.substr(pos, end - pos));
+        unsigned rgb = 0, idx = 0;
+        if (std::sscanf(item.c_str(), "%x=%x", &rgb, &idx) == 2 && idx < 16)
+            out.push_back({rgb & 0xFFFFFFu, static_cast<uint8_t>(idx)});
+        pos = end + 1;
+    }
+    return out;
+}
+
 uint8_t quantize(Rgb c)
 {
+    // The colour → lamp table wins over everything below, greys included (a
+    // grey is how a palette asks for the White lamp).
+    {
+        const uint32_t key = (uint32_t(c.r) << 16) | (uint32_t(c.g) << 8) | c.b;
+        std::lock_guard<std::mutex> lk(g_overrideMx);
+        for (const auto& o : g_overrides)
+            if (o.rgb == key) return o.index;
+    }
     // Greys and near-greys → 0x00 OFF. The display palette has no
     // white / grey / black anchor — the lowest-saturation entries are
     // 0x01 (A0,A0,FF light violet, S=0.373) and 0x0A (A0,FF,A0 pale
