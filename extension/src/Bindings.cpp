@@ -8483,6 +8483,9 @@ const char* builtinCategory(const std::string& n)
         return "Tracks";
 
     if (n.rfind("master_pin_", 0) == 0) return "Master";
+    // Level knobs for the master fader and the monitor output (main.cpp).
+    if (n == "master_volume" || n == "master_volume_reset"
+     || n == "monitor_level" || n == "monitor_level_reset") return "Master";
     if (n.rfind("brightness_", 0) == 0) return "Brightness";
     // Sleep is the same family as the brightness steps — it is where a
     // user looks for "make the panel go dark" — so it shares the category
@@ -8713,6 +8716,17 @@ static const BuiltinDoc kBuiltinDocs[] = {
       "the way Shift with the arrow keys does." },
     { "playhead_nudge",
       "Encoder action. Nudges the playhead by REAPER's own Nudge setting." },
+    { "master_volume",
+      "Encoder action. Moves the master track's volume 0.5 dB a detent "
+      "(0.1 dB with Fine)." },
+    { "master_volume_reset",
+      "Puts the master track's volume on 0 dB." },
+    { "monitor_level",
+      "Encoder action. Moves the monitor output 0.5 dB a detent (0.1 dB with "
+      "Fine): the master track's hardware output chosen under Settings -> "
+      "Behaviour -> Master track -> Monitor output." },
+    { "monitor_level_reset",
+      "Puts the monitor output (Settings -> Behaviour -> Master track) on 0 dB." },
     { "mouse_scroll",
       "Encoder action. Sends a mouse wheel to whatever sits under the "
       "cursor." },
