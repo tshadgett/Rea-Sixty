@@ -41,6 +41,10 @@ const char* reasixty_uf8RightSerial();
 const char* reasixty_colourMapText();
 void reasixty_setColourMapText(const char* text);
 int  reasixty_selectedTrackRgb();
+int  reasixty_masterHwOutCount();
+const char* reasixty_masterHwOutName(int i);
+int  reasixty_monitorHwOut();
+void reasixty_setMonitorHwOut(int i);
 const char* reasixty_uc1Serial();
 const char* reasixty_uf1Serial();
 bool reasixty_sleepEnabled();
@@ -1344,6 +1348,33 @@ void SettingsScreen::drawBehaviour(ImGui_Context* ctx)
     ImGui_Spacing(ctx);
     ImGui_Spacing(ctx);
     sectionHeader("Master track");
+
+    // The hardware output the monitor_level / monitor_level_reset actions ride
+    // (bind them to an encoder's rotation and push for a monitor-level knob).
+    {
+        const int n = reasixty_masterHwOutCount();
+        int cur = reasixty_monitorHwOut();
+        char preview[96];
+        if (n == 0) std::snprintf(preview, sizeof(preview), "(master has no hardware outputs)");
+        else if (cur >= n) std::snprintf(preview, sizeof(preview), "Output %d (not on the master)", cur + 1);
+        else std::snprintf(preview, sizeof(preview), "%d: %s", cur + 1, reasixty_masterHwOutName(cur));
+        ImGui_Text(ctx, "Monitor output");
+        help_(ctx, "The master track's hardware output that the 'Encoder: monitor level' "
+                   "and 'Monitor level to 0 dB' actions control. Bind them to an "
+                   "encoder's rotation and push, e.g. the UF1's CHANNEL encoder.");
+        ImGui_SameLine(ctx, nullptr, nullptr);
+        ImGui_SetNextItemWidth(ctx, 260.0);
+        if (ImGui_BeginCombo(ctx, "##monitor_hwout", preview, nullptr)) {
+            for (int i = 0; i < n; ++i) {
+                char item[96];
+                std::snprintf(item, sizeof(item), "%d: %s", i + 1, reasixty_masterHwOutName(i));
+                bool sel = (cur == i);
+                if (ImGui_Selectable(ctx, item, &sel, nullptr, nullptr, nullptr))
+                    reasixty_setMonitorHwOut(i);
+            }
+            ImGui_EndCombo(ctx);
+        }
+    }
 
     // CHANNEL encoder scrolls onto the Master track (IP_TRACKNUMBER 0)
     // before track 1, as a virtual "track 0". UC1-only — never appears on

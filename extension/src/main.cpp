@@ -4350,6 +4350,12 @@ std::atomic<int>  g_softKeyBankRight{1};
 // the binding fires on, applied by the timer (REAPER API is main-thread only).
 std::atomic<int>  g_masterVolSteps{0};
 std::atomic<bool> g_masterVolReset{false};
+// monitor_level / monitor_level_reset: the same for ONE hardware output of the
+// master track — the monitor feed. g_monitorHwOut is which one (0 = the first),
+// ExtState rea_sixty / monitor_hwout, Settings → Behaviour → Master track.
+std::atomic<int>  g_monitorSteps{0};
+std::atomic<bool> g_monitorReset{false};
+std::atomic<int>  g_monitorHwOut{0};
 std::atomic<bool> g_softKeyDirty{false};
 // When on (default), a focused-parameter change switches the SSL soft-key bank
 // to whichever bank holds that param ("bank-follow-focus"). Off = the soft-key
@@ -48687,6 +48693,27 @@ void onTimerBody_()
             }
         }
     }
+    // monitor_level / monitor_level_reset: the chosen hardware output of the
+    // master track.
+    {
+        const bool reset = g_monitorReset.exchange(false);
+        const int  steps = g_monitorSteps.exchange(0);
+        MediaTrack* m = GetMasterTrack(nullptr);
+        const int idx = g_monitorHwOut.load();
+        if ((reset || steps != 0) && m && idx >= 0
+            && idx < GetTrackNumSends(m, 1)) {
+            double v = reset ? 1.0 : GetTrackSendInfo_Value(m, 1, idx, "D_VOL");
+            if (steps != 0) {
+                const double perStep = shiftFineActive_() ? 0.1 : 0.5;
+                double db = (v > 0.0) ? 20.0 * std::log10(v) : -90.0;
+                if (db < -90.0) db = -90.0;
+                db += steps * perStep;
+                if (db > 12.0) db = 12.0;
+                v = (db <= -90.0) ? 0.0 : std::pow(10.0, db / 20.0);
+            }
+            SetTrackSendInfo_Value(m, 1, idx, "D_VOL", v);
+        }
+    }
     // Colour → lamp table: re-read about once a second, apply on change.
     {
         static int         sTick = 0;
@@ -51730,6 +51757,32 @@ void reasixty_identifyUc1()
 bool reasixty_selFollowsColor()
 {
     return g_selFollowsColor.load();
+}
+
+// Monitor output for monitor_level (Settings → Behaviour → Master track).
+int reasixty_masterHwOutCount()
+{
+    MediaTrack* m = GetMasterTrack(nullptr);
+    return m ? GetTrackNumSends(m, 1) : 0;
+}
+const char* reasixty_masterHwOutName(int i)
+{
+    static std::string s;
+    StripRoute r;
+    r.track = GetMasterTrack(nullptr);
+    r.sendCategory = 1;
+    r.sendIndex = i;
+    r.valid = r.track != nullptr && i >= 0 && i < reasixty_masterHwOutCount();
+    s = r.valid ? routeName_(r) : std::string();
+    return s.c_str();
+}
+int  reasixty_monitorHwOut() { return g_monitorHwOut.load(); }
+void reasixty_setMonitorHwOut(int i)
+{
+    g_monitorHwOut.store(std::max(0, i));
+    char b[8];
+    std::snprintf(b, sizeof(b), "%d", std::max(0, i));
+    SetExtState("rea_sixty", "monitor_hwout", b, true);
 }
 
 // Colour → lamp table (Palette.h). The ExtState text is the one truth: the
@@ -58195,6 +58248,20 @@ void registerBindingHandlers()
         },
         nullptr, "Master volume to 0 dB", false
     });
+    registerBuiltin("monitor_level", DescBuilder{
+        [](bool firing, bool /*pressed*/, int param) {
+            if (!firing || param == 0) return;
+            g_monitorSteps.fetch_add(param);
+        },
+        nullptr, "Encoder: monitor level (master hardware output, 0.5 dB / detent)", false
+    });
+    registerBuiltin("monitor_level_reset", DescBuilder{
+        [](bool firing, bool /*pressed*/, int /*param*/) {
+            if (!firing) return;
+            g_monitorReset.store(true);
+        },
+        nullptr, "Monitor level to 0 dB", false
+    });
     registerBuiltin("mouse_scroll", DescBuilder{
         [](bool firing, bool /*pressed*/, int param) {
             if (!firing) return;
@@ -60290,6 +60357,8 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
     // Restore persisted UI mode flags (Pan override, encoder mode) so
     // they survive REAPER restarts. ExtState is global per-extension —
     // persistAcrossSessions=true writes through to reaper-extstate.ini.
+    if (const char* v = GetExtState("rea_sixty", "monitor_hwout"); v && *v)
+        g_monitorHwOut.store(std::max(0, std::atoi(v)));
     if (const char* v = GetExtState("ReaSixty", "softKeyBankRight"); v && *v)
         g_softKeyBankRight.store(std::clamp(std::atoi(v), 0, uf8::kUserUf8VpotBankCount - 1));
     if (const char* v = GetExtState("ReaSixty", "forcePan");
