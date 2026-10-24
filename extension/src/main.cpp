@@ -22845,7 +22845,12 @@ void drainInputQueue()
             continue;
         }
         if (e.kind == PendingInput::AutomationModeGlobal) {
-            SetGlobalAutomationOverride(static_cast<int>(e.value));
+            // Pressing the override that is already on hands every track back
+            // its own mode (-1 = no override); REAPER's global automation
+            // button does the same. There was no way back from the surface.
+            const int want = static_cast<int>(e.value);
+            const int cur  = GetGlobalAutomationOverride();
+            SetGlobalAutomationOverride(cur == want ? -1 : want);
             continue;
         }
         if (e.kind == PendingInput::FocusSelected) {
