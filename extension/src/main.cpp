@@ -4346,6 +4346,10 @@ std::atomic<int>  g_softKeyBank{0};
 // across both units (uf8PmSpread_). Its own soft-key row selects it, the way the
 // left row selects g_softKeyBank. ExtState softKeyBankRight.
 std::atomic<int>  g_softKeyBankRight{1};
+// master_volume / master_volume_reset builtins: requests from whatever thread
+// the binding fires on, applied by the timer (REAPER API is main-thread only).
+std::atomic<int>  g_masterVolSteps{0};
+std::atomic<bool> g_masterVolReset{false};
 std::atomic<bool> g_softKeyDirty{false};
 // When on (default), a focused-parameter change switches the SSL soft-key bank
 // to whichever bank holds that param ("bank-follow-focus"). Off = the soft-key
@@ -48664,6 +48668,25 @@ void onTimerBody_()
             }
         }
     }
+    // master_volume / master_volume_reset (see their builtins).
+    {
+        const bool reset = g_masterVolReset.exchange(false);
+        const int  steps = g_masterVolSteps.exchange(0);
+        if (reset || steps != 0) {
+            if (MediaTrack* m = GetMasterTrack(nullptr)) {
+                double v = reset ? 1.0 : GetMediaTrackInfo_Value(m, "D_VOL");
+                if (steps != 0) {
+                    const double perStep = shiftFineActive_() ? 0.1 : 0.5;
+                    double db = (v > 0.0) ? 20.0 * std::log10(v) : -90.0;
+                    if (db < -90.0) db = -90.0;
+                    db += steps * perStep;
+                    if (db > 12.0) db = 12.0;
+                    v = (db <= -90.0) ? 0.0 : std::pow(10.0, db / 20.0);
+                }
+                CSurf_OnVolumeChange(m, v, false);
+            }
+        }
+    }
     // Colour → lamp table: re-read about once a second, apply on change.
     {
         static int         sTick = 0;
@@ -58153,6 +58176,24 @@ void registerBindingHandlers()
             applyPlayheadNudge_(param);
         },
         nullptr, "Encoder: nudge playhead", false
+    });
+    // ⇨ THE MASTER LEVEL ON ANY ENCODER. Rotation steps the master track's
+    // volume 0.5 dB a detent (0.1 dB with Fine); the reset puts it on 0 dB.
+    // Bind master_volume to an encoder's rotation and master_volume_reset to
+    // its push, e.g. the UF1's CHANNEL encoder as a dedicated output level.
+    registerBuiltin("master_volume", DescBuilder{
+        [](bool firing, bool /*pressed*/, int param) {
+            if (!firing || param == 0) return;
+            g_masterVolSteps.fetch_add(param);
+        },
+        nullptr, "Encoder: master volume (0.5 dB / detent)", false
+    });
+    registerBuiltin("master_volume_reset", DescBuilder{
+        [](bool firing, bool /*pressed*/, int /*param*/) {
+            if (!firing) return;
+            g_masterVolReset.store(true);
+        },
+        nullptr, "Master volume to 0 dB", false
     });
     registerBuiltin("mouse_scroll", DescBuilder{
         [](bool firing, bool /*pressed*/, int param) {
