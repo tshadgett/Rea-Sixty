@@ -8268,6 +8268,10 @@ std::string builtinDisplayName(const std::string& name)
 // was not enough: a cap cuts a sentence mid-word, it does not shorten it.
 bool uf1ControlShowsLabel(ButtonId id)
 {
+    // A per-view copy of the SOFT key (Plugin / Meter / … view) prints its
+    // name just like the key itself; the editor showed no Label field for it.
+    ButtonId base = ButtonId::None;
+    if (splitPerViewUf1Id(id, &base, nullptr)) id = base;
     return id == ButtonId::Uf1ChannelSoftKey
         || (id >= ButtonId::Uf1DisplaySoft1 && id <= ButtonId::Uf1DisplaySoft4);
 }
