@@ -322,7 +322,19 @@ enum class ButtonId : uint16_t {
     Uf8EncChannelPushMarkers, Uf8EncChannelPushBankBy1, Uf8EncChannelPushLastParam,
     Uf8EncChannelPushFxScrollAll, Uf8EncChannelPushInstanceScrollAll, Uf8EncChannelPushFxMove,
     Uf8EncChannelPushCsCycle, Uf8EncChannelPushBcCycle, Uf8EncChannelPushFavCycle, Uf8EncChannelPushLanes,
+
+    // ---- Dual UF8: the RIGHT unit's own copies of the left-panel keys -------
+    // Unbound (or bound to nothing) → the right unit's key does what the left
+    // one does, as every other global key. Bound → it fires its own binding and
+    // its lamp follows that binding (rightUnitVariant / main.cpp). tim branch.
+    SendPlugin1R, SendPlugin2R, SendPlugin3R, SendPlugin4R,
+    SendPlugin5R, SendPlugin6R, SendPlugin7R, SendPlugin8R,
+    PluginBtnR, ChannelR, PageLeftR, PageRightR,
 };
+
+// The right UF8's own ButtonId for a left-panel key, or None for keys both
+// units share.
+ButtonId rightUnitVariant(ButtonId id);
 
 // How many jog modes the nav block above is sized for. main.cpp owns the real
 // enum (Uf1JogMode) and static_asserts that the two agree — Bindings.h cannot

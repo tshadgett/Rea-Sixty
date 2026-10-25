@@ -863,6 +863,18 @@ const char* hwFaceLabel(ButtonId id)
         case ButtonId::SendPlugin6: return "S/P 6";
         case ButtonId::SendPlugin7: return "S/P 7";
         case ButtonId::SendPlugin8: return "S/P 8";
+        case ButtonId::SendPlugin1R: return "S/P 1 (R)";
+        case ButtonId::SendPlugin2R: return "S/P 2 (R)";
+        case ButtonId::SendPlugin3R: return "S/P 3 (R)";
+        case ButtonId::SendPlugin4R: return "S/P 4 (R)";
+        case ButtonId::SendPlugin5R: return "S/P 5 (R)";
+        case ButtonId::SendPlugin6R: return "S/P 6 (R)";
+        case ButtonId::SendPlugin7R: return "S/P 7 (R)";
+        case ButtonId::SendPlugin8R: return "S/P 8 (R)";
+        case ButtonId::PluginBtnR:   return "PLUGIN (R)";
+        case ButtonId::ChannelR:     return "CHANNEL (R)";
+        case ButtonId::PageLeftR:    return "PAGE \xE2\x97\x82 (R)";
+        case ButtonId::PageRightR:   return "PAGE \xE2\x96\xB8 (R)";
         case ButtonId::TopSoftKey1: return "Soft-Key 1";
         case ButtonId::TopSoftKey2: return "Soft-Key 2";
         case ButtonId::TopSoftKey3: return "Soft-Key 3";
@@ -1563,9 +1575,16 @@ static bool tileLeavesLayer_(ButtonId id, int activeLayer)
     return to >= 0 && to != activeLayer;
 }
 
+// Bindings → UF8: show the RIGHT unit's left-panel keys (S/P 1-8, PLUGIN,
+// CHANNEL, PAGE). An unbound right key does what the left one does.
+static bool s_uf8RightPanel = false;
+
 void drawUf8Vector(ImGui_Context* ctx, ButtonId& sel,
                    int editQuick, int editSubBank)
 {
+    const auto rv = [](ButtonId b) {
+        return s_uf8RightPanel ? uf8::bindings::rightUnitVariant(b) : b;
+    };
     constexpr float W = 1000, H = 490;
 
     // Lock the schematic font to Small (12 px) so the labels stay
@@ -2009,18 +2028,18 @@ void drawUf8Vector(ImGui_Context* ctx, ButtonId& sel,
                 const int idx = row * 2 + col;
                 snprintf(buf, sizeof(buf), "%d", idx + 1);
                 drawHwBtn(13 + col * 42, 152 + row * 26, 38, 22,
-                          kSp[idx], buf);
+                          rv(kSp[idx]), buf);
             }
         }
     }
 
     // PLUGIN / CHANNEL — wider buttons so their silk-screen labels fit.
-    drawHwBtn(13, 260, 50, 22, ButtonId::PluginBtn, "PLUGIN");
-    drawHwBtn(67, 260, 50, 22, ButtonId::Channel,   "CHANNEL");
+    drawHwBtn(13, 260, 50, 22, rv(ButtonId::PluginBtn), "PLUGIN");
+    drawHwBtn(67, 260, 50, 22, rv(ButtonId::Channel),   "CHANNEL");
 
     drawGroupLabelCentered(65, 286, "PAGE");
-    drawHwBtn(13, 300, 50, 22, ButtonId::PageLeft,  "\xE2\x97\x82");
-    drawHwBtn(67, 300, 50, 22, ButtonId::PageRight, "\xE2\x96\xB8");
+    drawHwBtn(13, 300, 50, 22, rv(ButtonId::PageLeft),  "\xE2\x97\x82");
+    drawHwBtn(67, 300, 50, 22, rv(ButtonId::PageRight), "\xE2\x96\xB8");
 
     drawHwBtn(13, 326, 104, 22, ButtonId::Flip, "FLIP");
 
@@ -7710,6 +7729,25 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
         if (showsDev(kDevUf8)
             && ImGui_BeginTabItem(ctx, "UF8", nullptr, &flagsUf8)) {
             persistDeviceTab(0);
+            {
+                // Right UF8's left panel: its own S/P 1-8, PLUGIN, CHANNEL and
+                // PAGE keys. Flipping it moves a selection to the other side.
+                bool r = s_uf8RightPanel;
+                if (ImGui_Checkbox(ctx, "Right UF8 left-panel keys##uf8_right_panel", &r)) {
+                    s_uf8RightPanel = r;
+                    for (int i = 0; i <= static_cast<int>(ButtonId::PageRightR); ++i) {
+                        const auto b = static_cast<ButtonId>(i);
+                        const auto v = uf8::bindings::rightUnitVariant(b);
+                        if (v == ButtonId::None) continue;
+                        if (r && s_selected == b)       { s_selected = v; break; }
+                        if (!r && s_selected == v)      { s_selected = b; break; }
+                    }
+                }
+                if (s_uf8RightPanel) {
+                    ImGui_SameLine(ctx, nullptr, nullptr);
+                    ImGui_TextDisabled(ctx, "Unbound keys do what the left unit's do.");
+                }
+            }
             drawUf8Vector(ctx, s_selected, s_editQuick, s_editSubBank);
             // Bank-scroll stride: when a selection scrolls past the surface
             // edge, jump a whole 8-strip bank or slide by one channel.

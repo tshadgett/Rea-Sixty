@@ -334,9 +334,40 @@ constexpr NameEntry kNames[] = {
     { ButtonId::Uf8EncChannelPushBcCycle, "uf8_enc_channel_push_bc_cycle" },
     { ButtonId::Uf8EncChannelPushFavCycle, "uf8_enc_channel_push_fav_cycle" },
     { ButtonId::Uf8EncChannelPushLanes, "uf8_enc_channel_push_lanes" },
+    { ButtonId::SendPlugin1R, "send_plugin_1_right" },
+    { ButtonId::SendPlugin2R, "send_plugin_2_right" },
+    { ButtonId::SendPlugin3R, "send_plugin_3_right" },
+    { ButtonId::SendPlugin4R, "send_plugin_4_right" },
+    { ButtonId::SendPlugin5R, "send_plugin_5_right" },
+    { ButtonId::SendPlugin6R, "send_plugin_6_right" },
+    { ButtonId::SendPlugin7R, "send_plugin_7_right" },
+    { ButtonId::SendPlugin8R, "send_plugin_8_right" },
+    { ButtonId::PluginBtnR,   "plugin_right"        },
+    { ButtonId::ChannelR,     "channel_right"       },
+    { ButtonId::PageLeftR,    "page_left_right"     },
+    { ButtonId::PageRightR,   "page_right_right"    },
 };
 
 } // namespace
+
+ButtonId rightUnitVariant(ButtonId id)
+{
+    switch (id) {
+        case ButtonId::SendPlugin1: return ButtonId::SendPlugin1R;
+        case ButtonId::SendPlugin2: return ButtonId::SendPlugin2R;
+        case ButtonId::SendPlugin3: return ButtonId::SendPlugin3R;
+        case ButtonId::SendPlugin4: return ButtonId::SendPlugin4R;
+        case ButtonId::SendPlugin5: return ButtonId::SendPlugin5R;
+        case ButtonId::SendPlugin6: return ButtonId::SendPlugin6R;
+        case ButtonId::SendPlugin7: return ButtonId::SendPlugin7R;
+        case ButtonId::SendPlugin8: return ButtonId::SendPlugin8R;
+        case ButtonId::PluginBtn:   return ButtonId::PluginBtnR;
+        case ButtonId::Channel:     return ButtonId::ChannelR;
+        case ButtonId::PageLeft:    return ButtonId::PageLeftR;
+        case ButtonId::PageRight:   return ButtonId::PageRightR;
+        default:                    return ButtonId::None;
+    }
+}
 
 bool splitPerEncModeUf8Id(ButtonId id, ButtonId* baseOut, int* modeOut)
 {
@@ -754,7 +785,7 @@ std::atomic<uint8_t> g_lastFiredMod[kLastFiredModSize] = {};
 static_assert(static_cast<int>(ButtonId::Uf8EncChannelPushLanes)
               == static_cast<int>(ButtonId::Uf8EncZoomUpChSelect) + 6 * kUf8EncModeCountForKeys - 1,
               "the per-encoder-mode block must stay six contiguous groups of kUf8EncModeCountForKeys");
-static_assert(static_cast<size_t>(ButtonId::Uf8EncChannelPushLanes) < kLastFiredModSize,
+static_assert(static_cast<size_t>(ButtonId::PageRightR) < kLastFiredModSize,
               "g_lastFiredMod must cover every ButtonId");
 
 uint32_t pressKey(int layer, ButtonId id)

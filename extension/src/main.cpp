@@ -27497,6 +27497,22 @@ static void onUf8InputUnit_(const uint8_t* dataIn, size_t lenIn, int unit)
                 handledNatively = true;
             }
 
+            // Right unit, a left-panel key with a binding of its own (Settings →
+            // Bindings → UF8 → Right): fire that one instead of the shared key.
+            if (!handledNatively && unit == 1) {
+                const auto rb = uf8::bindings::rightUnitVariant(
+                    uf8::bindings::fromUf8DeviceId(id));
+                if (rb != uf8::bindings::ButtonId::None) {
+                    const int lay = uf8::bindings::layerForButton(rb);
+                    if (uf8::bindings::hasBinding(lay, rb)
+                        && uf8::bindings::bindingHasAnyAction(
+                               uf8::bindings::getBinding(lay, rb))) {
+                        uf8::bindings::dispatch(rb, pressed);
+                        handledNatively = true;
+                    }
+                }
+            }
+
             // Phase 2.8 Nav Mode — additional surface-wide intercepts
             // while overlay active. All run on the libusb input thread
             // so each handler is a pure atomic state mutation; the
@@ -44096,7 +44112,33 @@ constexpr uf8::Uf8GlobalLed kAutoLeds[6] = {
 // no bindable button (Norm/Auto/Rec live elsewhere). Used by
 // sendUf8GlobalLed to fold per-binding LED-colour overrides into the
 // existing pushUf8GlobalLeds flow without disturbing state logic.
+// Set while sendUf8GlobalLed paints the RIGHT unit's copy of a left-panel
+// key that has a binding of its own: every lookup below then reads that one.
+thread_local bool t_rightLedPass = false;
+
+uf8::bindings::ButtonId buttonIdForGlobalLedBase_(uf8::Uf8GlobalLed cell);
+
 uf8::bindings::ButtonId buttonIdForGlobalLed(uf8::Uf8GlobalLed cell)
+{
+    const auto bid = buttonIdForGlobalLedBase_(cell);
+    if (!t_rightLedPass) return bid;
+    const auto rb = uf8::bindings::rightUnitVariant(bid);
+    return rb == uf8::bindings::ButtonId::None ? bid : rb;
+}
+
+// The right unit's variant of this cell's key, when it has a binding of its
+// own (an action, or an LED the user set on it); None otherwise.
+uf8::bindings::ButtonId rightOwnBinding_(uf8::Uf8GlobalLed cell)
+{
+    const auto rb = uf8::bindings::rightUnitVariant(buttonIdForGlobalLedBase_(cell));
+    if (rb == uf8::bindings::ButtonId::None) return rb;
+    const int lay = uf8::bindings::layerForButton(rb);
+    if (!uf8::bindings::hasBinding(lay, rb)) return uf8::bindings::ButtonId::None;
+    return uf8::bindings::bindingHasAnyAction(uf8::bindings::getBinding(lay, rb))
+         ? rb : uf8::bindings::ButtonId::None;
+}
+
+uf8::bindings::ButtonId buttonIdForGlobalLedBase_(uf8::Uf8GlobalLed cell)
 {
     using L = uf8::Uf8GlobalLed;
     using B = uf8::bindings::ButtonId;
@@ -44451,10 +44493,13 @@ struct GlobalLedKey {
 };
 constexpr size_t kGlobalLedCacheSize = 64;  // Uf8GlobalLed enum has ~46 entries
 std::array<GlobalLedKey, kGlobalLedCacheSize> g_lastGlobalLedPush{};
+// The right unit's own copy, used while a cell's right key is bound apart.
+std::array<GlobalLedKey, kGlobalLedCacheSize> g_lastGlobalLedPushR{};
 
 void invalidateGlobalLedCache_()
 {
     for (auto& k : g_lastGlobalLedPush) k.valid = false;
+    for (auto& k : g_lastGlobalLedPushR) k.valid = false;
 }
 
 void invalidateGlobalLedCell_(uf8::Uf8GlobalLed cell)
@@ -44462,10 +44507,36 @@ void invalidateGlobalLedCell_(uf8::Uf8GlobalLed cell)
     const size_t idx = static_cast<size_t>(cell);
     if (idx < g_lastGlobalLedPush.size()) {
         g_lastGlobalLedPush[idx].valid = false;
+        g_lastGlobalLedPushR[idx].valid = false;
     }
 }
 
+// target: -1 both units, 0 left only, 1 right only (own cache).
+static void sendUf8GlobalLedTo_(uf8::Uf8GlobalLed cell,
+                                uf8::GlobalLedState callerState, int target);
+
 void sendUf8GlobalLed(uf8::Uf8GlobalLed cell, uf8::GlobalLedState callerState)
+{
+    const auto rb = (uf8Units_() > 1) ? rightOwnBinding_(cell)
+                                      : uf8::bindings::ButtonId::None;
+    if (rb == uf8::bindings::ButtonId::None) {
+        // Shared key: both units, and the right cache forgets, so a key that
+        // goes back to shared is repainted the moment it is bound apart again.
+        const size_t idx = static_cast<size_t>(cell);
+        if (idx < g_lastGlobalLedPushR.size()) g_lastGlobalLedPushR[idx].valid = false;
+        sendUf8GlobalLedTo_(cell, callerState, -1);
+        return;
+    }
+    sendUf8GlobalLedTo_(cell, callerState, 0);
+    // The caller's state is the LEFT key's; the right one has its own action.
+    t_rightLedPass = true;
+    sendUf8GlobalLedTo_(cell, boundActionIsActive_(rb) ? uf8::GlobalLedState::Bright
+                                                        : uf8::GlobalLedState::Dim, 1);
+    t_rightLedPass = false;
+}
+
+static void sendUf8GlobalLedTo_(uf8::Uf8GlobalLed cell,
+                                uf8::GlobalLedState callerState, int target)
 {
     const bool callerActive = (callerState == uf8::GlobalLedState::Bright);
     const auto mod = liveModifierForLed_();
@@ -44542,8 +44613,9 @@ void sendUf8GlobalLed(uf8::Uf8GlobalLed cell, uf8::GlobalLedState callerState)
                  | (int(r.colour->aDim)    <<  8)
                  |  int(r.colour->bDim);
     }
-    if (idx < g_lastGlobalLedPush.size()) {
-        auto& last = g_lastGlobalLedPush[idx];
+    auto& cache = (target == 1) ? g_lastGlobalLedPushR : g_lastGlobalLedPush;
+    if (idx < cache.size()) {
+        auto& last = cache[idx];
         if (last.valid && last.state == static_cast<int>(r.state) &&
             last.colour32 == colour32) {
             return;
@@ -44553,11 +44625,10 @@ void sendUf8GlobalLed(uf8::Uf8GlobalLed cell, uf8::GlobalLedState callerState)
         last.valid    = true;
     }
 
-    if (r.colour) {
-        sendLedFrames(uf8::buildUf8GlobalLed(cell, r.state, *r.colour));
-    } else {
-        sendLedFrames(uf8::buildUf8GlobalLed(cell, r.state));
-    }
+    auto frames = r.colour ? uf8::buildUf8GlobalLed(cell, r.state, *r.colour)
+                           : uf8::buildUf8GlobalLed(cell, r.state);
+    if (target < 0)       sendLedFrames(std::move(frames));
+    else                  sendLedFramesS_(target * 8, std::move(frames));
 }
 
 void sendUf8GlobalLed(uf8::Uf8GlobalLed cell, bool on)
