@@ -875,6 +875,22 @@ const char* hwFaceLabel(ButtonId id)
         case ButtonId::ChannelR:     return "CHANNEL (R)";
         case ButtonId::PageLeftR:    return "PAGE \xE2\x97\x82 (R)";
         case ButtonId::PageRightR:   return "PAGE \xE2\x96\xB8 (R)";
+        case ButtonId::NavR:         return "NAV (R)";
+        case ButtonId::NudgeR:       return "NUDGE (R)";
+        case ButtonId::EncFocusR:    return "FOCUS (R)";
+        case ButtonId::BankLeftR:    return "BANK \xE2\x97\x82 (R)";
+        case ButtonId::BankRightR:   return "BANK \xE2\x96\xB8 (R)";
+        case ButtonId::ZoomUpR:      return "\xE2\x96\xB2 (R)";
+        case ButtonId::ZoomDownR:    return "\xE2\x96\xBC (R)";
+        case ButtonId::ZoomLeftR:    return "\xE2\x97\x82 (R)";
+        case ButtonId::ZoomRightR:   return "\xE2\x96\xB8 (R)";
+        case ButtonId::ZoomCenterR:  return "\xE2\x97\x8F (R)";
+        case ButtonId::Uf8REncTurn1: return "Encoder (R) mode 1";
+        case ButtonId::Uf8REncTurn2: return "Encoder (R) mode 2";
+        case ButtonId::Uf8REncTurn3: return "Encoder (R) mode 3";
+        case ButtonId::Uf8REncPush1: return "ENC PUSH (R) mode 1";
+        case ButtonId::Uf8REncPush2: return "ENC PUSH (R) mode 2";
+        case ButtonId::Uf8REncPush3: return "ENC PUSH (R) mode 3";
         case ButtonId::TopSoftKey1: return "Soft-Key 1";
         case ButtonId::TopSoftKey2: return "Soft-Key 2";
         case ButtonId::TopSoftKey3: return "Soft-Key 3";
@@ -1578,10 +1594,28 @@ static bool tileLeavesLayer_(ButtonId id, int activeLayer)
 // Bindings → UF8: show the RIGHT unit's left-panel keys (S/P 1-8, PLUGIN,
 // CHANNEL, PAGE). An unbound right key does what the left one does.
 static bool s_uf8RightPanel = false;
+// Which of the right encoder's own modes the dial / PUSH / ROTATE tiles edit.
+static int  s_uf8RightEncMode = 1;
+
+static bool isRightUnitId_(ButtonId id)
+{
+    return id >= ButtonId::SendPlugin1R && id <= ButtonId::Uf8REncPush3;
+}
 
 void drawUf8Vector(ImGui_Context* ctx, ButtonId& sel,
                    int editQuick, int editSubBank)
 {
+    // A key picked on the hardware (or pasted) says which side is shown.
+    if (isRightUnitId_(sel)) {
+        s_uf8RightPanel = true;
+        if (uf8::bindings::isUf8REncTurnId(sel))
+            s_uf8RightEncMode = static_cast<int>(sel) - static_cast<int>(ButtonId::Uf8REncTurn1) + 1;
+        else if (uf8::bindings::isUf8REncPushId(sel))
+            s_uf8RightEncMode = static_cast<int>(sel) - static_cast<int>(ButtonId::Uf8REncPush1) + 1;
+    } else if (uf8::bindings::rightUnitVariant(sel) != ButtonId::None
+               || sel == ButtonId::ChannelEncoder) {
+        s_uf8RightPanel = false;
+    }
     const auto rv = [](ButtonId b) {
         return s_uf8RightPanel ? uf8::bindings::rightUnitVariant(b) : b;
     };
@@ -2138,8 +2172,10 @@ void drawUf8Vector(ImGui_Context* ctx, ButtonId& sel,
         const float hbw = 2 * r, hbh = 2 * r;
         const bool hot      = inside(hbx, hby, hbw, hbh);
         // The push of the live encoder mode, like the PUSH tile below.
-        const ButtonId pushId = uf8::bindings::perEncModeUf8Id(
-            ButtonId::ChannelPush, reasixty_uf8EncoderMode());
+        const ButtonId pushId = s_uf8RightPanel
+            ? uf8::bindings::uf8REncPushId(s_uf8RightEncMode)
+            : uf8::bindings::perEncModeUf8Id(
+                  ButtonId::ChannelPush, reasixty_uf8EncoderMode());
         const bool selected = (pushId == sel);
         if (hot && canvasClicked && leftBtn == 0) sel = pushId;
 
@@ -2169,9 +2205,9 @@ void drawUf8Vector(ImGui_Context* ctx, ButtonId& sel,
     // NAV / NUDGE / FOCUS — sit below the encoder. Encoder Push has its
     // own click target on the dial above (kept the labelled bar too so
     // users still see the binding name explicitly).
-    drawHwBtn(852, 244, 44, 22, ButtonId::Nav,      "NAV");
-    drawHwBtn(898, 244, 44, 22, ButtonId::Nudge,    "NUDGE");
-    drawHwBtn(944, 244, 41, 22, ButtonId::EncFocus, "FOCUS");
+    drawHwBtn(852, 244, 44, 22, rv(ButtonId::Nav),      "NAV");
+    drawHwBtn(898, 244, 44, 22, rv(ButtonId::Nudge),    "NUDGE");
+    drawHwBtn(944, 244, 41, 22, rv(ButtonId::EncFocus), "FOCUS");
 
     // Channel-encoder bindings split into push (left) + rotate (right).
     // Rotate is the new bindable surface for the rotation gesture —
@@ -2180,13 +2216,22 @@ void drawUf8Vector(ImGui_Context* ctx, ButtonId& sel,
     // the tile shows and edits what the key does right now (the UF1 cross per
     // jog mode works the same way).
     const int em = reasixty_uf8EncoderMode();
-    auto encKey = [em](ButtonId base) { return uf8::bindings::perEncModeUf8Id(base, em); };
+    auto encKey = [em](ButtonId base) {
+        if (s_uf8RightPanel) {
+            if (base == ButtonId::ChannelPush)
+                return uf8::bindings::uf8REncPushId(s_uf8RightEncMode);
+            return uf8::bindings::rightUnitVariant(base);
+        }
+        return uf8::bindings::perEncModeUf8Id(base, em);
+    };
     drawHwBtn(852, 270, 65, 18, encKey(ButtonId::ChannelPush), "PUSH");
-    drawHwBtn(919, 270, 66, 18, ButtonId::ChannelEncoder, "ROTATE");
+    drawHwBtn(919, 270, 66, 18,
+              s_uf8RightPanel ? uf8::bindings::uf8REncTurnId(s_uf8RightEncMode)
+                              : ButtonId::ChannelEncoder, "ROTATE");
 
     drawGroupLabelCentered(917, 300, "BANK");
-    drawHwBtn(870, 314, 42, 22, ButtonId::BankLeft,  "\xE2\x97\x82");
-    drawHwBtn(922, 314, 42, 22, ButtonId::BankRight, "\xE2\x96\xB8");
+    drawHwBtn(870, 314, 42, 22, rv(ButtonId::BankLeft),  "\xE2\x97\x82");
+    drawHwBtn(922, 314, 42, 22, rv(ButtonId::BankRight), "\xE2\x96\xB8");
 
     // Zoom pad — cross. baseY tuned so the bottom arrow (baseY+32+26)
     // is flush with the FOOT 1 / FOOT 2 row bottom (y=442, h=22 → 464),
@@ -5048,6 +5093,7 @@ void drawBindingEditor(ImGui_Context* ctx, int layer, ButtonId id)
     // Momentary picks short OR long on release; Toggle / Hold fire primary
     // on press then long additively on hold-and-release past threshold.
     const bool isEncoder = (id == ButtonId::ChannelEncoder
+                          || uf8::bindings::isUf8REncTurnId(id)
                           || id == ButtonId::Uc1Encoder1
                           || id == ButtonId::Uc1Encoder2
                           || id == ButtonId::Uf1ChannelEncoder);
@@ -5064,7 +5110,8 @@ void drawBindingEditor(ImGui_Context* ctx, int layer, ButtonId id)
     // a real button (so it KEEPS long-press, hence not in isEncoder) but with
     // no LED of its own (Frank 2026-07-31: "dreh weg, bei push nicht"). UC1
     // controls are covered separately by idIsUc1.
-    const bool idNoLed = isEncoder || id == ButtonId::ChannelPush;
+    const bool idNoLed = isEncoder || id == ButtonId::ChannelPush
+                      || uf8::bindings::isUf8REncPushId(id);
 
     // Two side-by-side columns. Each child sized half the available
     // width with matching height so the bordered panels read as a pair.
@@ -7742,10 +7789,29 @@ void SettingsScreen::drawBindings(ImGui_Context* ctx)
                         if (r && s_selected == b)       { s_selected = v; break; }
                         if (!r && s_selected == v)      { s_selected = b; break; }
                     }
+                    if (!r && isRightUnitId_(s_selected))   // the encoder's own ids
+                        s_selected = uf8::bindings::isUf8REncTurnId(s_selected)
+                            ? ButtonId::ChannelEncoder : ButtonId::ChannelPush;
                 }
                 if (s_uf8RightPanel) {
                     ImGui_SameLine(ctx, nullptr, nullptr);
                     ImGui_TextDisabled(ctx, "Unbound keys do what the left unit's do.");
+                    // The right encoder's own modes: engaged with the builtins
+                    // "Right encoder: mode N" (bind them to keys of this unit).
+                    ImGui_TextDisabled(ctx, "Right encoder, editing mode:");
+                    for (int m = 1; m <= 3; ++m) {
+                        ImGui_SameLine(ctx, nullptr, nullptr);
+                        char lb[32]; snprintf(lb, sizeof(lb), "%d##uf8r_encmode_%d", m, m);
+                        if (ImGui_RadioButton(ctx, lb, s_uf8RightEncMode == m)) {
+                            s_uf8RightEncMode = m;
+                            if (uf8::bindings::isUf8REncTurnId(s_selected))
+                                s_selected = uf8::bindings::uf8REncTurnId(m);
+                            else if (uf8::bindings::isUf8REncPushId(s_selected))
+                                s_selected = uf8::bindings::uf8REncPushId(m);
+                        }
+                    }
+                    ImGui_SameLine(ctx, nullptr, nullptr);
+                    ImGui_TextDisabled(ctx, "(engaged by the \"Right encoder: mode N\" actions)");
                 }
             }
             drawUf8Vector(ctx, s_selected, s_editQuick, s_editSubBank);

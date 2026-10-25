@@ -330,7 +330,35 @@ enum class ButtonId : uint16_t {
     SendPlugin1R, SendPlugin2R, SendPlugin3R, SendPlugin4R,
     SendPlugin5R, SendPlugin6R, SendPlugin7R, SendPlugin8R,
     PluginBtnR, ChannelR, PageLeftR, PageRightR,
+    NavR, NudgeR, EncFocusR, BankLeftR, BankRightR,
+    ZoomUpR, ZoomDownR, ZoomLeftR, ZoomRightR, ZoomCenterR,
+    // The right channel encoder's own modes (builtin uf8r_enc_mode 1..3): each
+    // mode has its own rotation and push. Mode 0 = the encoder does what the
+    // left one does.
+    Uf8REncTurn1, Uf8REncTurn2, Uf8REncTurn3,
+    Uf8REncPush1, Uf8REncPush2, Uf8REncPush3,
 };
+
+inline ButtonId uf8REncTurnId(int mode)
+{
+    return (mode >= 1 && mode <= 3)
+        ? static_cast<ButtonId>(static_cast<int>(ButtonId::Uf8REncTurn1) + mode - 1)
+        : ButtonId::None;
+}
+inline ButtonId uf8REncPushId(int mode)
+{
+    return (mode >= 1 && mode <= 3)
+        ? static_cast<ButtonId>(static_cast<int>(ButtonId::Uf8REncPush1) + mode - 1)
+        : ButtonId::None;
+}
+inline bool isUf8REncTurnId(ButtonId id)
+{
+    return id >= ButtonId::Uf8REncTurn1 && id <= ButtonId::Uf8REncTurn3;
+}
+inline bool isUf8REncPushId(ButtonId id)
+{
+    return id >= ButtonId::Uf8REncPush1 && id <= ButtonId::Uf8REncPush3;
+}
 
 // The right UF8's own ButtonId for a left-panel key, or None for keys both
 // units share.

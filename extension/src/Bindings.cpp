@@ -346,6 +346,22 @@ constexpr NameEntry kNames[] = {
     { ButtonId::ChannelR,     "channel_right"       },
     { ButtonId::PageLeftR,    "page_left_right"     },
     { ButtonId::PageRightR,   "page_right_right"    },
+    { ButtonId::NavR,         "nav_right"           },
+    { ButtonId::NudgeR,       "nudge_right"         },
+    { ButtonId::EncFocusR,    "focus_right"         },
+    { ButtonId::BankLeftR,    "bank_left_right"     },
+    { ButtonId::BankRightR,   "bank_right_right"    },
+    { ButtonId::ZoomUpR,      "zoom_up_right"       },
+    { ButtonId::ZoomDownR,    "zoom_down_right"     },
+    { ButtonId::ZoomLeftR,    "zoom_left_right"     },
+    { ButtonId::ZoomRightR,   "zoom_right_right"    },
+    { ButtonId::ZoomCenterR,  "zoom_center_right"   },
+    { ButtonId::Uf8REncTurn1, "uf8r_enc_turn_1"     },
+    { ButtonId::Uf8REncTurn2, "uf8r_enc_turn_2"     },
+    { ButtonId::Uf8REncTurn3, "uf8r_enc_turn_3"     },
+    { ButtonId::Uf8REncPush1, "uf8r_enc_push_1"     },
+    { ButtonId::Uf8REncPush2, "uf8r_enc_push_2"     },
+    { ButtonId::Uf8REncPush3, "uf8r_enc_push_3"     },
 };
 
 } // namespace
@@ -365,6 +381,16 @@ ButtonId rightUnitVariant(ButtonId id)
         case ButtonId::Channel:     return ButtonId::ChannelR;
         case ButtonId::PageLeft:    return ButtonId::PageLeftR;
         case ButtonId::PageRight:   return ButtonId::PageRightR;
+        case ButtonId::Nav:         return ButtonId::NavR;
+        case ButtonId::Nudge:       return ButtonId::NudgeR;
+        case ButtonId::EncFocus:    return ButtonId::EncFocusR;
+        case ButtonId::BankLeft:    return ButtonId::BankLeftR;
+        case ButtonId::BankRight:   return ButtonId::BankRightR;
+        case ButtonId::ZoomUp:      return ButtonId::ZoomUpR;
+        case ButtonId::ZoomDown:    return ButtonId::ZoomDownR;
+        case ButtonId::ZoomLeft:    return ButtonId::ZoomLeftR;
+        case ButtonId::ZoomRight:   return ButtonId::ZoomRightR;
+        case ButtonId::ZoomCenter:  return ButtonId::ZoomCenterR;
         default:                    return ButtonId::None;
     }
 }
@@ -785,7 +811,7 @@ std::atomic<uint8_t> g_lastFiredMod[kLastFiredModSize] = {};
 static_assert(static_cast<int>(ButtonId::Uf8EncChannelPushLanes)
               == static_cast<int>(ButtonId::Uf8EncZoomUpChSelect) + 6 * kUf8EncModeCountForKeys - 1,
               "the per-encoder-mode block must stay six contiguous groups of kUf8EncModeCountForKeys");
-static_assert(static_cast<size_t>(ButtonId::PageRightR) < kLastFiredModSize,
+static_assert(static_cast<size_t>(ButtonId::Uf8REncPush3) < kLastFiredModSize,
               "g_lastFiredMod must cover every ButtonId");
 
 uint32_t pressKey(int layer, ButtonId id)
@@ -6615,6 +6641,20 @@ bool dispatchEncoder(ButtonId id, int stepDelta)
     const int slotIdx = static_cast<int>(currentModifierSnapshot());
     if (slotIdx < 0 || slotIdx >= kModifierCount) return false;
     const ActionSlot& slot = bd.shortPress[slotIdx];
+    // A MIDI step on an encoder: a Control Change goes out RELATIVE, one
+    // message a detent group, two's complement (1..63 up, 127..64 down —
+    // ReaLearn's "Relative 1"); its value field is ignored. Any other MIDI
+    // message fires once per detent, as before. MIDI steps carry no action
+    // name, so this comes before the empty-action test.
+    if (slot.type == ActionType::Midi) {
+        ActionStep m = slot;
+        if (static_cast<MidiMsgType>(m.midiMsgType) == MidiMsgType::ControlChange) {
+            const int st = std::clamp(stepDelta, -64, 63);
+            m.midiData2 = st > 0 ? st : 128 + st;
+        }
+        dispatchMidi_(m);
+        return true;
+    }
     if (slot.type == ActionType::Noop || slot.action.empty()) return false;
     if (slot.type != ActionType::Builtin) {
         // REAPER actions / keyboard / MIDI: fire once per detent. Not
@@ -8392,8 +8432,12 @@ const char* builtinCategory(const std::string& n)
     if (n.rfind("hue_", 0) == 0 || n == "uf1_hue")
         return "Hue";
 
-    if (n.rfind("encoder_", 0) == 0 || n.rfind("uf1_encoder_", 0) == 0)
+    if (n.rfind("encoder_", 0) == 0 || n.rfind("uf1_encoder_", 0) == 0
+     || n.rfind("uf8r_enc_mode_", 0) == 0)
         return "Encoder Modes";
+    // Metronome and tempo knobs (main.cpp), with the other level knobs.
+    if (n == "metronome_volume" || n == "metronome_volume_reset"
+     || n == "tempo_adjust") return "Master";
 
     // ⇨ jog_nav_* IS HIDDEN, NOT GONE.
     // The five collective nav builtins are what the cross fired before it became
@@ -8762,6 +8806,23 @@ static const BuiltinDoc kBuiltinDocs[] = {
       "Behaviour -> Master track -> Monitor output." },
     { "monitor_level_reset",
       "Puts the monitor output (Settings -> Behaviour -> Master track) on 0 dB." },
+    { "uf8r_enc_mode_1",
+      "Right UF8: the channel encoder takes its mode-1 rotation and push "
+      "(Settings -> Bindings -> UF8 -> Right). Again: back to the left's." },
+    { "uf8r_enc_mode_2",
+      "Right UF8: the channel encoder takes its mode-2 rotation and push. "
+      "Again: back to the left's." },
+    { "uf8r_enc_mode_3",
+      "Right UF8: the channel encoder takes its mode-3 rotation and push. "
+      "Again: back to the left's." },
+    { "metronome_volume",
+      "Encoder action. Moves the metronome volume by the Level knob step a "
+      "detent (both beat levels, keeping their balance)." },
+    { "metronome_volume_reset",
+      "Puts the metronome's main beat on 0 dB, keeping the second beat's "
+      "balance." },
+    { "tempo_adjust",
+      "Encoder action. Moves the project tempo 1 BPM a detent." },
     { "mouse_scroll",
       "Encoder action. Sends a mouse wheel to whatever sits under the "
       "cursor." },
@@ -9534,6 +9595,12 @@ static const BuiltinLabel kBuiltinLabels[] = {
     { "master_pin_strip1", "Master L" },
     { "master_pin_strip8", "Master R" },
     { "master_volume", "Master Vol" },
+    { "uf8r_enc_mode_1", "R Enc 1" },
+    { "uf8r_enc_mode_2", "R Enc 2" },
+    { "uf8r_enc_mode_3", "R Enc 3" },
+    { "metronome_volume", "Click Vol" },
+    { "metronome_volume_reset", "Click 0dB" },
+    { "tempo_adjust", "Tempo" },
     { "master_volume_reset", "Master 0dB" },
     { "mixer_toggle", "Settings" },
     { "mod_cmd", "Cmd" },

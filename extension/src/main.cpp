@@ -4353,6 +4353,15 @@ std::atomic<bool> g_masterVolReset{false};
 // monitor_level / monitor_level_reset: the same for ONE hardware output of the
 // master track — the monitor feed. g_monitorHwOut is which one (0 = the first),
 // ExtState rea_sixty / monitor_hwout, Settings → Behaviour → Master track.
+// Right UF8 channel encoder: 0 = does what the left one does, 1..3 = its own
+// mode, each with its own rotation and push binding (Uf8REncTurnN/PushN).
+// Builtins uf8r_enc_mode_N; ExtState rea_sixty / uf8r_enc_mode.
+std::atomic<int>  g_uf8REncMode{0};
+// metronome_volume / metronome_volume_reset / tempo_adjust: queued, applied by
+// the timer like the level knobs below.
+std::atomic<int>  g_metroSteps{0};
+std::atomic<bool> g_metroReset{false};
+std::atomic<int>  g_tempoSteps{0};
 std::atomic<int>  g_monitorSteps{0};
 std::atomic<bool> g_monitorReset{false};
 std::atomic<int>  g_monitorHwOut{0};
@@ -6497,6 +6506,8 @@ struct PendingInput {
         InstanceCycle,   // value = signed delta; Shift+channel-encoder cycles
                          // the active CS/BC instance on the focused (or
                          // BC-anchor) track regardless of encoder mode.
+        EncoderRotationR, // the RIGHT UF8's channel encoder in one of its own
+                          // modes (g_uf8REncMode); value = signed6 raw delta
         EncoderRotation, // value = signed6 raw delta from the channel
                          // encoder. drainInputQueue accumulates and
                          // dispatches via bindings::dispatchEncoder so
@@ -23371,6 +23382,14 @@ void drainInputQueue()
             applyInstanceCycle_(step);
             continue;
         }
+        if (e.kind == PendingInput::EncoderRotationR) {
+            static double sAccumR = 0.0;
+            const int step = encoderStepFrom_(sAccumR, e.value);
+            if (step != 0)
+                uf8::bindings::dispatchEncoder(
+                    uf8::bindings::uf8REncTurnId(g_uf8REncMode.load()), step);
+            continue;
+        }
         if (e.kind == PendingInput::EncoderRotation) {
             // Bindings-routed encoder dispatch. Accumulate raw signed6
             // detents into integer steps, then hand off to the
@@ -27256,8 +27275,17 @@ static void onUf8InputUnit_(const uint8_t* dataIn, size_t lenIn, int unit)
             // Settings → Bindings open: the press picks the key (BindingsPick.h).
             {
                 static std::array<bool, 256> sPickHeld{};
-                if (bindingsPickGate_(0, uf8RemapForEncMode_(uf8::bindings::fromUf8DeviceId(id)), id,
-                                      pressed, sPickHeld)) {
+                auto pickId = uf8RemapForEncMode_(uf8::bindings::fromUf8DeviceId(id));
+                if (unit == 1) {
+                    // The right unit picks its own key where it has one.
+                    const auto base = uf8::bindings::fromUf8DeviceId(id);
+                    if (id == 0x76 && g_uf8REncMode.load() > 0)
+                        pickId = uf8::bindings::uf8REncPushId(g_uf8REncMode.load());
+                    else if (const auto rb = uf8::bindings::rightUnitVariant(base);
+                             rb != uf8::bindings::ButtonId::None)
+                        pickId = rb;
+                }
+                if (bindingsPickGate_(0, pickId, id, pressed, sPickHeld)) {
                     i += frameSize;
                     continue;
                 }
@@ -27499,6 +27527,13 @@ static void onUf8InputUnit_(const uint8_t* dataIn, size_t lenIn, int unit)
 
             // Right unit, a left-panel key with a binding of its own (Settings →
             // Bindings → UF8 → Right): fire that one instead of the shared key.
+            if (!handledNatively && unit == 1 && id == 0x76 && g_uf8REncMode.load() > 0) {
+                // The right encoder's push in one of its own modes: no mode
+                // picker on this unit, a plain press / release.
+                uf8::bindings::dispatch(
+                    uf8::bindings::uf8REncPushId(g_uf8REncMode.load()), pressed);
+                handledNatively = true;
+            }
             if (!handledNatively && unit == 1) {
                 const auto rb = uf8::bindings::rightUnitVariant(
                     uf8::bindings::fromUf8DeviceId(id));
@@ -28313,6 +28348,10 @@ static void onUf8InputUnit_(const uint8_t* dataIn, size_t lenIn, int unit)
                             break;
                     }
                 }
+            } else if (hwPot == 0x08 && unit == 1 && g_uf8REncMode.load() > 0) {
+                // The right unit's encoder in one of its own modes.
+                queueInput({PendingInput::EncoderRotationR, 0,
+                            static_cast<double>(signed6)});
             } else if (hwPot == 0x08) {
                 // Bankable dynamic bank paging: when the engaged sub-bank is
                 // an FX / Sends bank configured to page with the UF8 encoder,
@@ -44118,11 +44157,21 @@ thread_local bool t_rightLedPass = false;
 
 uf8::bindings::ButtonId buttonIdForGlobalLedBase_(uf8::Uf8GlobalLed cell);
 
+// The cell's key with the encoder-mode remap undone (the zoom pad's ids are
+// per mode on the left; the right unit has one set).
+static uf8::bindings::ButtonId rightVariantOfCell_(uf8::Uf8GlobalLed cell)
+{
+    auto bid = buttonIdForGlobalLedBase_(cell);
+    uf8::bindings::ButtonId base = uf8::bindings::ButtonId::None;
+    if (uf8::bindings::splitPerEncModeUf8Id(bid, &base, nullptr)) bid = base;
+    return uf8::bindings::rightUnitVariant(bid);
+}
+
 uf8::bindings::ButtonId buttonIdForGlobalLed(uf8::Uf8GlobalLed cell)
 {
     const auto bid = buttonIdForGlobalLedBase_(cell);
     if (!t_rightLedPass) return bid;
-    const auto rb = uf8::bindings::rightUnitVariant(bid);
+    const auto rb = rightVariantOfCell_(cell);
     return rb == uf8::bindings::ButtonId::None ? bid : rb;
 }
 
@@ -44130,7 +44179,7 @@ uf8::bindings::ButtonId buttonIdForGlobalLed(uf8::Uf8GlobalLed cell)
 // own (an action, or an LED the user set on it); None otherwise.
 uf8::bindings::ButtonId rightOwnBinding_(uf8::Uf8GlobalLed cell)
 {
-    const auto rb = uf8::bindings::rightUnitVariant(buttonIdForGlobalLedBase_(cell));
+    const auto rb = rightVariantOfCell_(cell);
     if (rb == uf8::bindings::ButtonId::None) return rb;
     const int lay = uf8::bindings::layerForButton(rb);
     if (!uf8::bindings::hasBinding(lay, rb)) return uf8::bindings::ButtonId::None;
@@ -44533,6 +44582,30 @@ void sendUf8GlobalLed(uf8::Uf8GlobalLed cell, uf8::GlobalLedState callerState)
     sendUf8GlobalLedTo_(cell, boundActionIsActive_(rb) ? uf8::GlobalLedState::Bright
                                                         : uf8::GlobalLedState::Dim, 1);
     t_rightLedPass = false;
+}
+
+// Every tick: the right unit's own keys follow their own bindings, whether or
+// not anything asked the left cell to repaint (its own dedup keeps the USB
+// quiet).
+void sweepRightUnitLeds_()
+{
+    if (uf8Units_() < 2) return;
+    using L = uf8::Uf8GlobalLed;
+    static const L kCells[] = {
+        L::SendPlugin1, L::SendPlugin2, L::SendPlugin3, L::SendPlugin4,
+        L::SendPlugin5, L::SendPlugin6, L::SendPlugin7, L::SendPlugin8,
+        L::Plugin, L::Channel, L::PageLeft, L::PageRight,
+        L::Nav, L::Nudge, L::Focus, L::BankLeft, L::BankRight,
+        L::ZoomUp, L::ZoomDown, L::ZoomLeft, L::ZoomRight, L::ZoomCenter,
+    };
+    for (const L cell : kCells) {
+        const auto rb = rightOwnBinding_(cell);
+        if (rb == uf8::bindings::ButtonId::None) continue;
+        t_rightLedPass = true;
+        sendUf8GlobalLedTo_(cell, boundActionIsActive_(rb) ? uf8::GlobalLedState::Bright
+                                                            : uf8::GlobalLedState::Dim, 1);
+        t_rightLedPass = false;
+    }
 }
 
 static void sendUf8GlobalLedTo_(uf8::Uf8GlobalLed cell,
@@ -45091,6 +45164,7 @@ void pushUf8GlobalLeds()
         }
         g_lastEncoderMode = encMode;
     }
+    sweepRightUnitLeds_();
 
     g_globalLedsInit = true;
 }
@@ -48801,6 +48875,39 @@ void onTimerBody_()
             }
             SetTrackSendInfo_Value(m, 1, idx, "D_VOL", v);
         }
+    }
+    // metronome_volume / _reset: the project's two click levels (projmetrov1 =
+    // the main beat, projmetrov2 = the second), moved together so their
+    // balance holds.
+    {
+        const bool reset = g_metroReset.exchange(false);
+        const int  steps = g_metroSteps.exchange(0);
+        if (reset || steps != 0) {
+            int sz1 = 0, sz2 = 0;
+            const int o1 = projectconfig_var_getoffs("projmetrov1", &sz1);
+            const int o2 = projectconfig_var_getoffs("projmetrov2", &sz2);
+            auto* v1 = (o1 >= 0 && sz1 == 8)
+                ? static_cast<double*>(projectconfig_var_addr(nullptr, o1)) : nullptr;
+            auto* v2 = (o2 >= 0 && sz2 == 8)
+                ? static_cast<double*>(projectconfig_var_addr(nullptr, o2)) : nullptr;
+            if (v1) {
+                const double old = *v1;
+                double db = (old > 0.0) ? 20.0 * std::log10(old) : -90.0;
+                if (reset) db = 0.0;
+                db = std::clamp(db + steps * levelKnobStepDb_(), -90.0, 12.0);
+                const double nv = (db <= -90.0) ? 0.0 : std::pow(10.0, db / 20.0);
+                if (v2) {
+                    if (old > 0.0) *v2 = std::min(*v2 * (nv / old), 4.0);
+                    else           *v2 = nv * 0.5;
+                }
+                *v1 = nv;
+            }
+        }
+    }
+    // tempo_adjust: 1 BPM a detent.
+    if (const int t = g_tempoSteps.exchange(0); t != 0) {
+        const double bpm = std::clamp(Master_GetTempo() + t, 2.0, 960.0);
+        SetCurrentBPM(nullptr, bpm, true);
     }
     // Colour → lamp table: re-read about once a second, apply on change.
     {
@@ -58363,6 +58470,46 @@ void registerBindingHandlers()
         },
         nullptr, "Monitor level to 0 dB", false
     });
+    // Right UF8 channel encoder modes. Pressing the engaged one again hands the
+    // encoder back to the left's behaviour. Lit while engaged.
+    auto rEncMode = [](int m, const char* disp) {
+        return DescBuilder{
+            [m](bool firing, bool /*pressed*/, int /*param*/) {
+                if (!firing) return;
+                const int next = (g_uf8REncMode.load() == m) ? 0 : m;
+                g_uf8REncMode.store(next);
+                char b[4]; snprintf(b, sizeof(b), "%d", next);
+                SetExtState("rea_sixty", "uf8r_enc_mode", b, true);
+                g_pageDirty.store(true);
+            },
+            [m](int) { return g_uf8REncMode.load() == m; },
+            disp, false
+        };
+    };
+    registerBuiltin("uf8r_enc_mode_1", rEncMode(1, "Right encoder: mode 1"));
+    registerBuiltin("uf8r_enc_mode_2", rEncMode(2, "Right encoder: mode 2"));
+    registerBuiltin("uf8r_enc_mode_3", rEncMode(3, "Right encoder: mode 3"));
+    registerBuiltin("metronome_volume", DescBuilder{
+        [](bool firing, bool /*pressed*/, int param) {
+            if (!firing || param == 0) return;
+            g_metroSteps.fetch_add(param);
+        },
+        nullptr, "Encoder: metronome volume", false
+    });
+    registerBuiltin("metronome_volume_reset", DescBuilder{
+        [](bool firing, bool /*pressed*/, int /*param*/) {
+            if (!firing) return;
+            g_metroReset.store(true);
+        },
+        nullptr, "Metronome volume to 0 dB", false
+    });
+    registerBuiltin("tempo_adjust", DescBuilder{
+        [](bool firing, bool /*pressed*/, int param) {
+            if (!firing || param == 0) return;
+            g_tempoSteps.fetch_add(param);
+        },
+        nullptr, "Encoder: project tempo", false
+    });
     registerBuiltin("mouse_scroll", DescBuilder{
         [](bool firing, bool /*pressed*/, int param) {
             if (!firing) return;
@@ -60464,6 +60611,8 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
         g_levelKnobStepTenths.store(std::clamp(std::atoi(v), 1, 60));
     if (const char* v = GetExtState("rea_sixty", "monitor_hwout"); v && *v)
         g_monitorHwOut.store(std::max(0, std::atoi(v)));
+    if (const char* v = GetExtState("rea_sixty", "uf8r_enc_mode"); v && *v)
+        g_uf8REncMode.store(std::clamp(std::atoi(v), 0, 3));
     if (const char* v = GetExtState("ReaSixty", "softKeyBankRight"); v && *v)
         g_softKeyBankRight.store(std::clamp(std::atoi(v), 0, uf8::kUserUf8VpotBankCount - 1));
     if (const char* v = GetExtState("ReaSixty", "forcePan");
