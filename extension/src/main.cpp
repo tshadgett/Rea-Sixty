@@ -36610,6 +36610,28 @@ static bool uf1HandOverScreen_()
     return false;
 }
 
+// The SOFT key's label (zone 0x0004, index 0), from the binding the current
+// view fires — Settings → Bindings → UF1 → SOFT → Label. Painted in the Channel
+// views AND the Meter view: the zone shows in both, and in Meter view it kept
+// the last Channel-view text (or the factory "Focus Chan"), whatever the Meter
+// view's own binding was called (tim branch).
+static void uf1PaintSoftKeyLabel_(bool changed)
+{
+    if (!g_uf1_dev) return;
+    static std::string sChSoft;
+    const auto bdSoft = uf8::bindings::getBinding(
+        uf8::bindings::getActiveLayer(),
+        uf1RemapForView_(uf8::bindings::ButtonId::Uf1ChannelSoftKey));
+    const std::string lbl = utf8ToLatin1(bdSoft.label);
+    if (changed || lbl != sChSoft) {
+        sChSoft = lbl;
+        std::vector<uint8_t> p;
+        p.push_back(0x00);                       // the one index
+        p.insert(p.end(), lbl.begin(), lbl.end());
+        g_uf1_dev->send(uf1::buildScreen(uf1::scr::kChSoftKey, p));
+    }
+}
+
 void uf1PaintChannel_()
 {
     if (g_paletteSwatch.load() >= 0) g_swDbgPaint.fetch_add(1);
@@ -37421,6 +37443,7 @@ void uf1PaintChannel_()
     }
     if (meterView) {
         uf1PaintMeter_(tr, changed);
+        uf1PaintSoftKeyLabel_(changed);
         // The time field keeps running here too, as under SSL 360 2.1.12 (cap130,
         // Analogue): every screen but the Overview, whose stream is the pacer's.
         if (g_uf1MeterScreen.load() != 0) uf1PaintTimeField_(changed);
@@ -37885,26 +37908,7 @@ void uf1PaintChannel_()
     // channel no matter what the key was bound to (Frank 2026-08-10).
     // Change-detected; forced on `changed` like every other zone here.
     {
-        static std::string sChSoft;
-        // Layer-aware, like this key's dispatch and its LED already are. It read
-        // layer 0 outright, so renaming the SOFT key on Layer 2 changed what it
-        // fired and what its LED did, while the channel display kept showing
-        // Layer 1's name.
-        // Per view as well as per layer: this key is one of the four the view
-        // decides, so the label has to name the action the view will fire.
-        const auto bdSoft = uf8::bindings::getBinding(
-            uf8::bindings::getActiveLayer(),
-            uf1RemapForView_(uf8::bindings::ButtonId::Uf1ChannelSoftKey));
-        // The user types this label in Settings, so it is arbitrary UTF-8; fold it
-        // like every other UF1 text zone.
-        const std::string lbl = utf8ToLatin1(bdSoft.label);
-        if (changed || lbl != sChSoft) {
-            sChSoft = lbl;
-            std::vector<uint8_t> p;
-            p.push_back(0x00);                       // the one index
-            p.insert(p.end(), lbl.begin(), lbl.end());
-            g_uf1_dev->send(uf1::buildScreen(uf1::scr::kChSoftKey, p));
-        }
+        uf1PaintSoftKeyLabel_(changed);
         // ⛔ NOBODY LIGHTS 0x0000 FROM HERE. It used to carry the SOFT key's state
         // (lit while its bound builtin reported ON, added 2026-08-10 on the belief
         // that the key had no LED of its own — WRONG: it has one like every other
@@ -57039,7 +57043,11 @@ void registerBindingHandlers()
     registerBuiltin("uf1_master", DescBuilder{
         [](bool firing, bool /*pressed*/, int /*param*/) {
             if (!firing) return;
-            g_uf1Master.store(!g_uf1Master.load());
+            const bool on = !g_uf1Master.load();
+            g_uf1Master.store(on);
+            // Remembered across sessions (tim branch): a UF1 parked on the
+            // master stays there after a restart.
+            SetExtState("rea_sixty", "uf1_master", on ? "1" : "0", true);
         },
         [](int) { return g_uf1Master.load(); },
         "UF1: MASTER track", false
@@ -60379,6 +60387,8 @@ extern "C" REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(
     // Restore persisted UI mode flags (Pan override, encoder mode) so
     // they survive REAPER restarts. ExtState is global per-extension —
     // persistAcrossSessions=true writes through to reaper-extstate.ini.
+    if (const char* v = GetExtState("rea_sixty", "uf1_master"); v && *v)
+        g_uf1Master.store(v[0] == '1');
     if (const char* v = GetExtState("rea_sixty", "level_knob_step"); v && *v)
         g_levelKnobStepTenths.store(std::clamp(std::atoi(v), 1, 60));
     if (const char* v = GetExtState("rea_sixty", "monitor_hwout"); v && *v)
