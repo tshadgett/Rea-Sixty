@@ -43414,6 +43414,31 @@ void chaseFocusedFxWindow()
 
 // Host-keyboard Alt/Option held? Single call-site shape across the three
 // target platforms — see the #include block at the top of this file.
+// host_key_shift / _ctrl / _alt: a surface key held = the computer's own key
+// held. 0 = Shift, 1 = Ctrl, 2 = Alt. Any key still down when the extension
+// unloads is let go, so REAPER never inherits a stuck modifier.
+static std::atomic<bool> g_hostKeyDown[3]{};
+static void hostModifierKey_(int which, bool down)
+{
+    if (which < 0 || which > 2) return;
+    if (g_hostKeyDown[which].exchange(down) == down) return;   // no repeats
+#if defined(_WIN32)
+    static const WORD kVk[3] = { VK_SHIFT, VK_CONTROL, VK_MENU };
+    INPUT in{};
+    in.type       = INPUT_KEYBOARD;
+    in.ki.wVk     = kVk[which];
+    in.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
+    SendInput(1, &in, sizeof(INPUT));
+#endif
+}
+static bool hostModifierKeyDown_(int which)
+{
+    return which >= 0 && which <= 2 && g_hostKeyDown[which].load();
+}
+static struct HostKeyRelease_ {
+    ~HostKeyRelease_() { for (int k = 0; k < 3; ++k) hostModifierKey_(k, false); }
+} g_hostKeyRelease_;
+
 bool hostAltHeld_()
 {
 #if defined(__APPLE__)
@@ -58503,6 +58528,25 @@ void registerBindingHandlers()
         },
         nullptr, "Metronome volume to 0 dB", false
     });
+    // Computer-keyboard Shift / Ctrl / Alt, held while the key is held: the
+    // surface key stands in for the real one (mouse edits, REAPER's own
+    // modifier shortcuts). Windows only (SendInput); a no-op elsewhere.
+    // Rea-Sixty's own keyboard poll sees the injected Shift / Ctrl too, so
+    // the surface's Shift / Ctrl slots follow, the same as the real keys.
+    auto hostKey = [](int which, const char* disp) {
+        return DescBuilder{
+            [which](bool /*firing*/, bool pressed, int /*param*/) {
+                hostModifierKey_(which, pressed);
+            },
+            [which](int) { return hostModifierKeyDown_(which); },
+            disp, false
+        };
+    };
+    registerBuiltin("host_key_shift", hostKey(0, "Computer key: hold Shift"));
+    registerBuiltin("host_key_ctrl",  hostKey(1, "Computer key: hold Ctrl"));
+    registerBuiltin("host_key_alt",   hostKey(2, "Computer key: hold Alt"));
+    for (const char* n : { "host_key_shift", "host_key_ctrl", "host_key_alt" })
+        uf8::bindings::setBuiltinKind(n, uf8::bindings::BuiltinKind::Edges);
     registerBuiltin("tempo_adjust", DescBuilder{
         [](bool firing, bool /*pressed*/, int param) {
             if (!firing || param == 0) return;

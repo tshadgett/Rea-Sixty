@@ -8572,7 +8572,7 @@ const char* builtinCategory(const std::string& n)
     if (n == "sleep_now") return "Brightness";
 
     if (n == "mod_shift" || n == "mod_cmd" || n == "mod_ctrl"
-     || n == "uf1_fine_toggle")
+     || n == "uf1_fine_toggle" || n.rfind("host_key_", 0) == 0)
         return "Modifiers";
 
     if (n.rfind("fx_param_", 0) == 0)
@@ -9153,6 +9153,13 @@ static const BuiltinDoc kBuiltinDocs[] = {
     { "mod_ctrl",
       "Holds the Ctrl modifier while pressed. Param 1 makes it a toggle "
       "instead." },
+    { "host_key_shift",
+      "Holds the computer keyboard's Shift key while pressed (Windows), for "
+      "mouse edits and REAPER's own modifier shortcuts." },
+    { "host_key_ctrl",
+      "Holds the computer keyboard's Ctrl key while pressed (Windows)." },
+    { "host_key_alt",
+      "Holds the computer keyboard's Alt key while pressed (Windows)." },
     { "jog_mode_cycle",
       "UF1. Steps the jog wheel through its seven modes." },
     { "jog_mode_playhead",
@@ -9606,6 +9613,9 @@ static const BuiltinLabel kBuiltinLabels[] = {
     { "mod_cmd", "Cmd" },
     { "mod_ctrl", "Ctrl" },
     { "mod_shift", "Shift" },
+    { "host_key_shift", "Key Shift" },
+    { "host_key_ctrl", "Key Ctrl" },
+    { "host_key_alt", "Key Alt" },
     { "mode_banner_toggle", "Mode Banner" },
     { "monitor_level", "Monitor Lvl" },
     { "monitor_level_reset", "Monitor 0dB" },
