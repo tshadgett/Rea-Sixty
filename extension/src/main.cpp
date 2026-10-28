@@ -25584,27 +25584,26 @@ bool ReaSixtySurface::GetTouchState(MediaTrack* tr, int isPan)
 // off until a cap23b verifies its id range.
 enum class LedClass : uint8_t { Sel = 0, Mute = 1, Solo = 2, Arm = 3 };
 
-// SEL lamp for a track colour. The Track colour -> UF8 lamp table (Settings
-// -> Appearance) wins here as it does for the colour bar: the table's lamp
-// index stands for the nearest SEL palette colour. Anything not in the table
-// quantizes as before.
+// The button lamp for a track colour: the SAME lamp the colour bar shows.
+// The bar goes through uf8::quantize (the Track colour -> UF8 lamp table
+// first, then the matching measured on the hardware); button LEDs used their
+// own nearest-RGB match, which put hue-340 magentas on the light-pink LED and
+// hue-293 pinks on the magenta one (tim 2026-10-28). Each bar index lights
+// the button LED of the same name; light green / light blue have no LED of
+// their own and take green / cyan.
 static uf8::LedColour selLedColourForRgb_(uint32_t rgb)
 {
-    for (const auto& o : uf8::colourOverrides()) {
-        if ((o.rgb & 0xFFFFFF) != (rgb & 0xFFFFFF)) continue;
-        // Lamp index (Palette.cpp's names) -> the SEL palette colour of the
-        // same name (Protocol.cpp's anchors; light green / light blue have
-        // no SEL lamp of their own and take green / cyan).
-        static const uint32_t kAnchor[13] = {
-            0xFFFFFF,                       // 00 off -> white
-            0xFFFFFF, 0xFF0000, 0x00FF00,   // 01 white, 02 red, 03 green
-            0x0000FF, 0x00FFFF, 0xFF00FF,   // 04 blue, 05 cyan, 06 magenta
-            0xFFFF00, 0xFF8000, 0x8000FF,   // 07 yellow, 08 orange, 09 purple
-            0x00FF00, 0xFF0080, 0x00FFFF,   // 0A light green, 0B pink, 0C light blue
-        };
-        if (o.index < 13) return uf8::ledColourForTrackRgb(kAnchor[o.index]);
-        break;
-    }
+    rgb &= 0xFFFFFF;
+    if (rgb == 0) return uf8::ledColourForTrackRgb(0);
+    static const uint32_t kAnchor[13] = {
+        0,                              // 00 off: no lamp, fall back below
+        0xFFFFFF, 0xFF0000, 0x00FF00,   // 01 white, 02 red, 03 green
+        0x0000FF, 0x00FFFF, 0xFF00FF,   // 04 blue, 05 cyan, 06 magenta
+        0xFFFF00, 0xFF8000, 0x8000FF,   // 07 yellow, 08 orange, 09 purple
+        0x00FF00, 0xFF0080, 0x00FFFF,   // 0A light green, 0B pink, 0C light blue
+    };
+    const uint8_t idx = uf8::quantize(rgb);
+    if (idx < 13 && kAnchor[idx] != 0) return uf8::ledColourForTrackRgb(kAnchor[idx]);
     return uf8::ledColourForTrackRgb(rgb);
 }
 
@@ -41085,7 +41084,7 @@ void pushZonesForVisibleSlots()
                 // Dynamic bank (Track Colours) supplies its own per-key LED
                 // colour; brightness still follows tssk (match = bright).
                 ledColRgb = dynInfo.rgb;
-                ledClr = uf8::ledColourForTrackRgb(ledColRgb);
+                ledClr = selLedColourForRgb_(ledColRgb);   // the bar's lamp
             } else if (pluginModeLocal) {
                 if (auto uctx = userStripCtxFocused_(); uctx.map) {
                     const auto& tl = uctx.map->uf8.topSoftKeyLeds[sk];
