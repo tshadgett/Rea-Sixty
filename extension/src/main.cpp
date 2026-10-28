@@ -25584,6 +25584,30 @@ bool ReaSixtySurface::GetTouchState(MediaTrack* tr, int isPan)
 // off until a cap23b verifies its id range.
 enum class LedClass : uint8_t { Sel = 0, Mute = 1, Solo = 2, Arm = 3 };
 
+// SEL lamp for a track colour. The Track colour -> UF8 lamp table (Settings
+// -> Appearance) wins here as it does for the colour bar: the table's lamp
+// index stands for the nearest SEL palette colour. Anything not in the table
+// quantizes as before.
+static uf8::LedColour selLedColourForRgb_(uint32_t rgb)
+{
+    for (const auto& o : uf8::colourOverrides()) {
+        if ((o.rgb & 0xFFFFFF) != (rgb & 0xFFFFFF)) continue;
+        // Lamp index (Palette.cpp's names) -> the SEL palette colour of the
+        // same name (Protocol.cpp's anchors; light green / light blue have
+        // no SEL lamp of their own and take green / cyan).
+        static const uint32_t kAnchor[13] = {
+            0xFFFFFF,                       // 00 off -> white
+            0xFFFFFF, 0xFF0000, 0x00FF00,   // 01 white, 02 red, 03 green
+            0x0000FF, 0x00FFFF, 0xFF00FF,   // 04 blue, 05 cyan, 06 magenta
+            0xFFFF00, 0xFF8000, 0x8000FF,   // 07 yellow, 08 orange, 09 purple
+            0x00FF00, 0xFF0080, 0x00FFFF,   // 0A light green, 0B pink, 0C light blue
+        };
+        if (o.index < 13) return uf8::ledColourForTrackRgb(kAnchor[o.index]);
+        break;
+    }
+    return uf8::ledColourForTrackRgb(rgb);
+}
+
 // Resolve the LED colour for a given class on a given track. SEL pulls from
 // REAPER's track-colour (snapped to SSL360's DAW-Colour palette); SOLO and
 // CUT use class defaults (yellow / red). When the user later wires a
@@ -25621,7 +25645,7 @@ uf8::LedColour ledColourFor(LedClass cls, MediaTrack* tr)
         if (!g_selFollowsColor.load()) {
             return uf8::ledColourWhite();
         }
-        return uf8::ledColourForTrackRgb(trackColorRgb(tr));
+        return selLedColourForRgb_(trackColorRgb(tr));
     }
     switch (cls) {
         case LedClass::Solo: return uf8::ledColourYellow();
