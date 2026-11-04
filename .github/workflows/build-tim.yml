@@ -4,10 +4,24 @@ name: Build (Tim)
 # is ready to download in a few minutes without running the four-platform
 # matrix. Frank's build.yml is untouched (it only runs on main, tags and PRs),
 # so merging upstream into this branch never conflicts with this file.
+#
+# Run it by hand (Actions -> Build (Tim) -> Run workflow) with "publish" ticked
+# and it also releases the build to Tim's ReaPack repository:
+#   https://github.com/tshadgett/Rea-Sixty/raw/reapack/index.xml
+# A push never publishes, so untested work does not reach the studio PC on
+# the next ReaPack sync.
 on:
   push:
     branches: [tim]
   workflow_dispatch:
+    inputs:
+      publish:
+        description: "Publish this build to Tim's ReaPack repository"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
 
 jobs:
   windows-x64:
@@ -57,3 +71,71 @@ jobs:
           name: rea-sixty-userplugins
           path: out/*
           if-no-files-found: error
+
+  publish:
+    needs: windows-x64
+    if: github.event_name == 'workflow_dispatch' && inputs.publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download the build
+        uses: actions/download-artifact@v4
+        with:
+          name: rea-sixty-userplugins
+          path: out
+
+      - name: Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="1.0.${{ github.run_number }}"
+          TAG="tim-v${VERSION}"
+          SUBJECT="$(git log -1 --format=%s)"
+          gh release create "$TAG" out/reaper_rea-sixty.dll out/libusb-1.0.dll out/hidapi.dll \
+            --target "${{ github.sha }}" --title "Rea-Sixty (Tim) ${VERSION}" \
+            --notes "Build of tim @ ${GITHUB_SHA::8}: ${SUBJECT}"
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "TAG=$TAG" >> "$GITHUB_ENV"
+          echo "SUBJECT=$SUBJECT" >> "$GITHUB_ENV"
+
+      # The index lives on its own branch so publishing never pushes to tim
+      # (which would start another build). One version is listed: the newest.
+      - name: Update the ReaPack index
+        run: |
+          BASE="https://github.com/${{ github.repository }}/releases/download/${TAG}"
+          NOW="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          SUBJ="$(printf '%s' "$SUBJECT" | sed 's/]]>/]] >/g')"
+          mkdir -p /tmp/idx
+          cat > /tmp/idx/index.xml <<XML
+          <?xml version="1.0" encoding="utf-8"?>
+          <index version="1" name="Rea-Sixty (Tim)">
+            <category name="Extensions">
+              <reapack name="Rea-Sixty_Tim.ext" type="extension" desc="Rea-Sixty, Tim's build (dual UF8 + personal changes)">
+                <version name="${VERSION}" author="Tim Shadgett" time="${NOW}">
+                  <changelog><![CDATA[${SUBJ}]]></changelog>
+                  <source platform="win64" file="reaper_rea-sixty.dll">${BASE}/reaper_rea-sixty.dll</source>
+                  <source platform="win64" file="libusb-1.0.dll">${BASE}/libusb-1.0.dll</source>
+                  <source platform="win64" file="hidapi.dll">${BASE}/hidapi.dll</source>
+                </version>
+              </reapack>
+            </category>
+          </index>
+          XML
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code origin reapack >/dev/null 2>&1; then
+            git fetch origin reapack
+            git switch reapack
+          else
+            git switch --orphan reapack
+            git rm -rf --quiet . || true
+          fi
+          cp /tmp/idx/index.xml index.xml
+          git add index.xml
+          git commit -m "ReaPack: Rea-Sixty (Tim) ${VERSION}"
+          git push origin reapack
+
