@@ -35,9 +35,25 @@ jobs:
       - name: Build
         run: cmake --build extension/build --config Release --parallel
 
+      # The extension loads libusb-1.0.dll and hidapi.dll from UserPlugins;
+      # ship them with it so a fresh install (no ReaPack Rea-Sixty) works.
+      - name: Gather UserPlugins files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path out | Out-Null
+          Copy-Item extension/build/Release/reaper_rea-sixty.dll out/
+          $usb = Get-ChildItem -Recurse "${{ github.workspace }}/libusb" -Filter libusb-1.0.dll |
+                 Where-Object { $_.FullName -match 'MS64' -and $_.FullName -match 'dll' } | Select-Object -First 1
+          $hid = Get-ChildItem -Recurse "${{ github.workspace }}/hidapi" -Filter hidapi.dll |
+                 Where-Object { $_.FullName -match 'x64' } | Select-Object -First 1
+          if (-not $usb -or -not $hid) { throw "libusb or hidapi DLL not found" }
+          Copy-Item $usb.FullName out/
+          Copy-Item $hid.FullName out/
+          Get-ChildItem out
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: reaper_rea-sixty.dll
-          path: extension/build/Release/reaper_rea-sixty.dll
+          name: rea-sixty-userplugins
+          path: out/*
           if-no-files-found: error
