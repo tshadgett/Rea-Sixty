@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<index version="1" name="Rea-Sixty (Tim)">
+  <category name="Extensions">
+    <reapack name="Rea-Sixty_Tim.ext" type="extension" desc="Rea-Sixty, Tim's build (dual UF8 + personal changes)">
+      <version name="1.0.10" author="Tim Shadgett" time="2026-11-04T07:01:17Z">
+        <changelog><![CDATA[Build (Tim): publish to Tim's own ReaPack repository on demand]]></changelog>
+        <source platform="win64" file="reaper_rea-sixty.dll">https://github.com/tshadgett/Rea-Sixty/releases/download/tim-v1.0.10/reaper_rea-sixty.dll</source>
+        <source platform="win64" file="libusb-1.0.dll">https://github.com/tshadgett/Rea-Sixty/releases/download/tim-v1.0.10/libusb-1.0.dll</source>
+        <source platform="win64" file="hidapi.dll">https://github.com/tshadgett/Rea-Sixty/releases/download/tim-v1.0.10/hidapi.dll</source>
+      </version>
+    </reapack>
+  </category>
+</index>
